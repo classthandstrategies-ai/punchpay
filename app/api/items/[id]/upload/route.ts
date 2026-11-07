@@ -1,7 +1,8 @@
 import { db, itemById, claimItemState, recordEvent, requireDemoAccess, responseError, HttpError, EVIDENCE_BUCKET } from "@/lib/server";
 import type { ItemState } from "@/lib/types";
 export const runtime = "nodejs";
-const MAX_BYTES = 6 * 1024 * 1024;
+// 4 MB: stays under the 4.5 MB request-body limit of serverless hosts such as Vercel.
+const MAX_BYTES = 4 * 1024 * 1024;
 const UPLOADABLE: ItemState[] = ["authorized", "submitted", "reviewed"];
 
 function sniff(magic: Uint8Array): "image/jpeg" | "image/png" | "image/webp" | null {
@@ -15,8 +16,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   try {
     requireDemoAccess(request);
     const { id } = await params;
-    const declared = Number(request.headers.get("content-length") || 0);
-    if (declared > MAX_BYTES + 64 * 1024) throw new HttpError(413, "Images must be 6 MB or smaller");
+    // Require a declared length so a chunked body cannot be buffered past the limit by formData().
+    const declared = Number(request.headers.get("content-length") || NaN);
+    if (!Number.isFinite(declared)) throw new HttpError(411, "Upload must declare its size");
+    if (declared > MAX_BYTES + 64 * 1024) throw new HttpError(413, "Images must be 4 MB or smaller");
     const item = await itemById(id);
     if (!UPLOADABLE.includes(item.state)) throw new HttpError(409, "Evidence can only be uploaded while the PayPal authorization is open and before a decision");
 
@@ -24,7 +27,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const file = form.get("file");
     const stage = form.get("stage");
     if (!(file instanceof File) || !(stage === "before" || stage === "after")) throw new HttpError(400, "Upload requires a file and a stage (before or after)");
-    if (file.size === 0 || file.size > MAX_BYTES) throw new HttpError(413, "Images must be between 1 byte and 6 MB");
+    if (file.size === 0 || file.size > MAX_BYTES) throw new HttpError(413, "Images must be between 1 byte and 4 MB");
     const type = sniff(new Uint8Array(await file.slice(0, 12).arrayBuffer()));
     if (!type) throw new HttpError(415, "Only real JPG, PNG or WebP images are accepted");
     if (file.type && file.type !== type) throw new HttpError(415, "Image contents do not match the declared file type");
@@ -38,7 +41,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const patch = stage === "before" ? { before_path: path } : { after_path: path };
     try {
       // Guarded on the state we read: an upload can never overwrite a decision in progress.
-      await claimItemState(id, item.state, other ? "submitted" : "authorized", { ...patch, ai_review: null });
+      // Also match both paths as read: a concurrent upload makes this one 409 instead of writing a stale state.
+      await claimItemState(id, item.state, other ? "submitted" : "authorized", { ...patch, ai_review: null }, { before_path: item.before_path, after_path: item.after_path });
     } catch (claimError) {
       await db().storage.from(EVIDENCE_BUCKET).remove([path]).catch(() => null);
       throw claimError;

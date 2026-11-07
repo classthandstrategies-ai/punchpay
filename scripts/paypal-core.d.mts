@@ -1,7 +1,7 @@
 export const BASE: string;
 export type Money = { currency_code: string; value: string };
 export type PayPalLink = { href: string; rel: string; method?: string };
-export type PayPalAuthorization = { id: string; status: string; amount?: Money; expiration_time?: string; payee?: { merchant_id?: string; email_address?: string } };
+export type PayPalAuthorization = { id: string; status: string; amount?: Money; expiration_time?: string; payee?: { merchant_id?: string; email_address?: string }; supplementary_data?: { related_ids?: { order_id?: string } }; payeeVerifiedVia?: "authorization" | "parent_order" };
 export type PayPalCapture = { id: string; status: string; amount?: Money };
 export type PayPalOrder = {
   id: string;
@@ -31,7 +31,7 @@ export class PayPalSandbox {
   getCapture(captureId: string): Promise<PayPalCapture>;
   createOrder(opts: { referenceId: string; description: string; cents: number; requestId: string; returnUrl?: string; cancelUrl?: string }): Promise<{ order: PayPalOrder; payee: string }>;
   authorizeApproved(orderId: string, opts: { referenceId: string; cents: number; requestId: string }): Promise<{ authorization: PayPalAuthorization; recovered: boolean; payee: string }>;
-  verifiedAuthorization(authId: string, cents: number): Promise<PayPalAuthorization>;
-  captureAuthorization(authId: string, opts: { cents: number; requestId: string }): Promise<{ captureId: string; status: string }>;
-  voidAuthorization(authId: string, opts: { cents: number; requestId: string }): Promise<{ authorizationId: string; status: string }>;
+  verifiedAuthorization(authId: string, cents: number, orderId?: string | null): Promise<PayPalAuthorization>;
+  captureAuthorization(authId: string, opts: { cents: number; requestId: string; orderId?: string | null }): Promise<{ captureId: string; status: string }>;
+  voidAuthorization(authId: string, opts: { cents: number; requestId: string; orderId?: string | null }): Promise<{ authorizationId: string; status: string }>;
 }

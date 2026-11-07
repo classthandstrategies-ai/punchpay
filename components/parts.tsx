@@ -120,7 +120,7 @@ export function Ledger({ items }: { items: PunchItem[] }) {
       return <tr key={i.id}>
         <th scope="row">{i.title}<small>{i.location}</small></th>
         <td className="num" data-label="Amount">{money(i.amount_cents)}</td>
-        <td data-label="Hold">{i.paypal_auth_id ? "Authorized" : i.paypal_order_id ? "Awaiting approval" : "Not placed"}</td>
+        <td data-label="Hold">{i.state === "captured" ? "Captured" : i.state === "voided" ? "Released" : i.paypal_auth_id ? "Held" : i.paypal_order_id ? "Awaiting approval" : "Not placed"}</td>
         <td data-label="Outcome"><span className={cx("ledger-outcome", `o-${outcome.toLowerCase().replace(" ", "-")}`)}>{outcome}</span>{i.paypal_status && <small>PayPal: {i.paypal_status}</small>}</td>
         <td className="refs" data-label="PayPal reference">
           {i.paypal_order_id && <span>Order <code>{i.paypal_order_id}</code></span>}

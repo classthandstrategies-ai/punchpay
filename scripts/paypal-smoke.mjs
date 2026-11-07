@@ -51,11 +51,11 @@ async function settle() {
     await save(s);
   }
   if (!s.paint.captureId) {
-    const c = await api.captureAuthorization(s.paint.authorizationId, { cents: ITEMS.paint.cents, requestId: `punchpay-capture-${s.paint.authorizationId}` });
+    const c = await api.captureAuthorization(s.paint.authorizationId, { cents: ITEMS.paint.cents, requestId: `punchpay-capture-${s.paint.authorizationId}`, orderId: s.paint.orderId });
     Object.assign(s.paint, { captureId: c.captureId, captureStatus: c.status, capturedAt: stamp() }); await save(s);
   }
   if (s.tile.voidStatus !== "VOIDED") {
-    const v = await api.voidAuthorization(s.tile.authorizationId, { cents: ITEMS.tile.cents, requestId: `punchpay-void-${s.tile.authorizationId}` });
+    const v = await api.voidAuthorization(s.tile.authorizationId, { cents: ITEMS.tile.cents, requestId: `punchpay-void-${s.tile.authorizationId}`, orderId: s.tile.orderId });
     Object.assign(s.tile, { voidStatus: v.status, voidedAt: stamp() }); await save(s);
   }
   await verify(s);
@@ -66,17 +66,18 @@ async function verify(s = null) {
   s = s || await load();
   if (!s.paint?.captureId || !s.tile?.authorizationId) throw new Error("Nothing settled yet; run sandbox:settle");
   const capture = await api.getCapture(s.paint.captureId);
-  const paintAuth = await api.verifiedAuthorization(s.paint.authorizationId, ITEMS.paint.cents);
-  const tileAuth = await api.verifiedAuthorization(s.tile.authorizationId, ITEMS.tile.cents);
+  // verifiedAuthorization throws unless the payee is the contractor (directly, or via the parent order).
+  const paintAuth = await api.verifiedAuthorization(s.paint.authorizationId, ITEMS.paint.cents, s.paint.orderId);
+  const tileAuth = await api.verifiedAuthorization(s.tile.authorizationId, ITEMS.tile.cents, s.tile.orderId);
   const result = {
     verifiedAt: stamp(), merchantId: api.merchantId,
-    paint: { orderId: s.paint.orderId, authorizationId: paintAuth.id, authorizationStatus: paintAuth.status, captureId: capture.id, captureStatus: capture.status, captureAmount: capture.amount, payee: paintAuth.payee?.merchant_id },
-    tile: { orderId: s.tile.orderId, authorizationId: tileAuth.id, authorizationStatus: tileAuth.status, amount: tileAuth.amount, payee: tileAuth.payee?.merchant_id }
+    paint: { orderId: s.paint.orderId, authorizationId: paintAuth.id, authorizationStatus: paintAuth.status, captureId: capture.id, captureStatus: capture.status, captureAmount: capture.amount, payeeVerifiedVia: paintAuth.payeeVerifiedVia },
+    tile: { orderId: s.tile.orderId, authorizationId: tileAuth.id, authorizationStatus: tileAuth.status, amount: tileAuth.amount, payeeVerifiedVia: tileAuth.payeeVerifiedVia }
   };
   s.verification = result; await save(s);
   console.log("\nINDEPENDENTLY VERIFIED SANDBOX OUTCOMES (GET):");
   console.log(JSON.stringify(result, null, 2));
-  const ok = capture.status === "COMPLETED" && tileAuth.status === "VOIDED" && result.paint.payee === api.merchantId && result.tile.payee === api.merchantId;
+  const ok = capture.status === "COMPLETED" && capture.amount?.value === "30.00" && tileAuth.status === "VOIDED";
   console.log(ok ? "\nGATE PASSED: $30 capture COMPLETED, $20 authorization VOIDED, payee = contractor merchant." : "\nGATE NOT PASSED: see statuses above.");
   if (!ok) process.exitCode = 1;
 }

@@ -34,7 +34,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export async function itemById(id: string): Promise<PunchItem> {
   if (!UUID.test(id)) throw new HttpError(404, "Item not found");
   const { data, error } = await db().from("punch_items").select("*").eq("id", id).maybeSingle();
-  if (error) throw new HttpError(500, error.message);
+  if (error) { console.error(`[punchpay] read ${id}: ${error.message}`); throw new HttpError(500, "Database error"); }
   if (!data) throw new HttpError(404, "Item not found");
   return data as PunchItem;
 }
@@ -50,7 +50,12 @@ export async function claimItemState(id: string, prior: ItemState | ItemState[],
     .eq("id", id).in("state", priors);
   for (const [column, value] of Object.entries(match)) query = value === null ? query.is(column, null) : query.eq(column, value);
   const { data, error } = await query.select().maybeSingle();
-  if (error) throw new HttpError(500, error.message);
+  if (error) {
+    console.error(`[punchpay] update ${id} ${priors.join("|")} -> ${next} refused: ${error.code} ${error.message}`);
+    // P0001 = state-machine trigger, 23514 = check constraint, 23505 = duplicate PayPal ID. Details stay in server logs.
+    if (["P0001", "23514", "23505"].includes(error.code)) throw new HttpError(409, "The database refused this change because it would break the payment rules. Refresh and check the item.");
+    throw new HttpError(500, "Database error");
+  }
   if (!data) throw new HttpError(409, "This item changed in another session. Refresh before retrying.");
   return data as PunchItem;
 }
@@ -82,8 +87,12 @@ export async function signedImage(path: string | null) {
 
 export function responseError(error: unknown) {
   if (error instanceof HttpError) return Response.json({ error: error.message }, { status: error.status });
-  const message = error instanceof Error ? error.message : "Request failed";
-  const status = typeof (error as { status?: unknown })?.status === "number" && (error as { name?: string }).name === "PayPalError" ? 502 : 400;
-  if (status === 502) console.error("[punchpay]", message);
-  return Response.json({ error: message }, { status });
+  if (error instanceof Error && error.name === "PayPalError") {
+    console.error("[punchpay]", error.message);
+    return Response.json({ error: error.message }, { status: 502 });
+  }
+  // Remaining Errors are PunchPay's own verification messages (payee/amount/status checks): safe to show.
+  if (error instanceof Error && !(error instanceof TypeError)) return Response.json({ error: error.message }, { status: 422 });
+  console.error("[punchpay] unexpected", error);
+  return Response.json({ error: "Unexpected server error" }, { status: 500 });
 }

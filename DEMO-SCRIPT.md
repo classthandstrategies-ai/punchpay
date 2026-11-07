@@ -1,23 +1,25 @@
-# PunchPay demo video storyboard (target 2:30, never exceed 2:59)
+# PunchPay demo video: shot list (target 2:30, hard limit 2:59)
 
-## 00:00–00:17 | Problem
-Show a clean renovation photo or simple room background (team-owned) and an outstanding balance.
-Narration: "The renovation is almost done. Two tiny defects remain. Why should one unresolved tile delay payment for a finished paint repair?"
+Every shot must be real app footage against the PayPal sandbox and the live Claude API. No mock screens, no pre-written AI text. Film after `docs/PROOF-SANDBOX.md` is complete.
 
-## 00:17–00:36 | Contract
-Show actual app. Two items, $30 paint touch-up and $20 tile replacement, each with visual acceptance criteria. Show PayPal independent AUTHORIZE approvals already recorded using sandbox buyer, and optionally a 2-second checkout clip. Do not imply payment has already been captured.
+**Prep before recording**
+- Run the demo reset (`select public.punchpay_reset_demo();` as service role). This archives the previous run.
+- Have the four photos ready: paint before/after, tile before/after.
+- Browser at 1440×900, 100% zoom.
+- A second window logged in to the sandbox Personal buyer.
+- Hide the bookmarks bar and any personal accounts.
 
-## 00:36–01:08 | Contractor proof
-Switch to contractor role. Upload staged before/after photo pairs. Run Claude Vision on the paint and tile. Paint report: supported visual evidence. Tile report: obvious unresolved crack/grout issue. Ensure it is *really* what the live model says; no pre-scripted fake AI output. Point out uncertainty or limitations.
+| Time | Shot | On screen | Narration (approx.) |
+| --- | --- | --- | --- |
+| 0:00–0:14 | Hook | Cover: "Every fix reviewed. Every payment decided." Tally shows $50.00 under contract. | "A renovation is ninety-nine percent done. Two small fixes are left. Why should one unresolved tile hold up payment for a finished paint repair?" |
+| 0:14–0:32 | Two separate holds | Homeowner role, Paint, PayPal button, sandbox checkout popup, approve. Back in the app: "Funds held", authorization ID visible. Repeat quickly for Tile (cut the popup). | "Each fix gets its own PayPal authorization. The money is held, not paid. Two fixes, two independent holds." |
+| 0:32–0:58 | Contractor evidence | Click "Switch to contractor". Upload paint before/after, then tile before/after. Record shows each upload. | "The contractor submits before-and-after photos. They're stored privately and shown only through short-lived links." |
+| 0:58–1:28 | Advisory AI | "Request advisory review" on Paint: the live report shows the per-criterion results. Then Tile: visible concern, with the "What these photos cannot show" box. Pause on the model name and timestamp. | "Claude compares the photos against the agreed criteria. It describes only what's visible and says plainly what it can't see. It's advice, not a certification. It never decides." |
+| 1:28–1:58 | Two human decisions | Switch to homeowner. Paint: "Accept and pay $30.00", inline confirm, green outcome with capture ID and COMPLETED. Tile: "Reject and release", confirm, stone outcome with VOIDED. | "The homeowner decides. Accept captures thirty dollars from that hold only. Reject voids the other hold, and the homeowner isn't charged." |
+| 1:58–2:16 | Proof | Tally: $30 paid, $20 released. Scroll to the Payments ledger (order, auth, capture IDs, payee) and the Project record. Refresh the page: everything persists. | "Every status here came back from PayPal and was checked with a follow-up GET. Refresh, and it's all still there. No double charges on retry." |
+| 2:16–2:30 | Close | Optional 3-second split with the `npm run sandbox:verify` output. End on the wordmark. | "PayPal Orders and Payments v2, Claude vision, and a decision that stays human. PunchPay." |
 
-## 01:08–01:47 | Two different decisions
-Switch to homeowner. Review paint and click Accept & pay $30. Show real returned PayPal capture ID and `COMPLETED`, not a loading mock. Review tile and click Reject & release $20. Show real PayPal authorization `VOIDED`.
-
-## 01:47–02:08 | Why this matters
-Show the two independent outcome cards and audit event timeline. "One project. Two decisions. The contractor gets paid for accepted work; the homeowner isn't charged for rejected work. The AI never makes the decision."
-
-## 02:08–02:29 | Technical proof & close
-Show tight split-screen of real PayPal sandbox request IDs/status responses and app. "PayPal Orders v2, Payments v2, Claude Vision, and a documented human decision." Final title "PunchPay. Every fix reviewed. Every payment decided."
-
-## Before filming
-Verify live sandbox payee belongs to contractor and both final statuses are API-backed; capture evidence without publishing credentials or personal account data. Use original photos, design assets, and royalty-free or original sound. Upload publicly to YouTube. Product must remain judge-accessible through the judging period.
+**Do not**
+- Say "escrow", "guaranteed", "certified" or "inspected".
+- Show client secrets, the `.env.local` file, or buyer personal data.
+- Speed-ramp the PayPal popup so it looks instant. Cut it instead.

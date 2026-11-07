@@ -126,20 +126,32 @@ export class PayPalSandbox {
       auth = getAuth(authorized);
     }
     assertAmount(auth.amount, cents, "authorization amount");
+    // Only an open authorization is a real hold. DENIED/VOIDED/PENDING must never be recorded as "funds held".
+    if (auth.status !== "CREATED") throw new Error(`PayPal authorization is ${auth.status}, not an open hold`);
     return { authorization: auth, recovered: order.status === "COMPLETED", payee: this.merchantId };
   }
 
-  /** Verified Payments v2 authorization owned by this merchant, for this exact amount. */
-  async verifiedAuthorization(authId, cents) {
+  /**
+   * Verified Payments v2 authorization owned by this merchant, for this exact amount.
+   * The authorization GET documents a read-only `payee`. If a response omits it, the payee is
+   * verified through the parent order instead (which must also list this authorization), never skipped.
+   */
+  async verifiedAuthorization(authId, cents, orderId) {
     const auth = await this.getAuthorization(authId);
     if (auth?.id !== authId) throw new Error("PayPal returned a different authorization");
-    assertPayee(auth, this.merchantId);
     assertAmount(auth.amount, cents, "authorization amount");
+    if (auth.payee?.merchant_id) { assertPayee(auth, this.merchantId); auth.payeeVerifiedVia = "authorization"; return auth; }
+    const parent = auth.supplementary_data?.related_ids?.order_id || orderId;
+    if (!parent) throw new Error("Authorization reports no payee and no parent order; cannot verify who is paid");
+    const order = await this.getOrder(parent);
+    assertPayee(order, this.merchantId);
+    if (!order.purchase_units?.[0]?.payments?.authorizations?.some((a) => a.id === authId)) throw new Error("Parent order does not contain this authorization");
+    auth.payeeVerifiedVia = "parent_order";
     return auth;
   }
 
-  async captureAuthorization(authId, { cents, requestId }) {
-    const auth = await this.verifiedAuthorization(authId, cents);
+  async captureAuthorization(authId, { cents, requestId, orderId }) {
+    const auth = await this.verifiedAuthorization(authId, cents, orderId);
     // CAPTURED is allowed only as an idempotent replay of our own request ID (PayPal returns latest status).
     if (!["CREATED", "PENDING", "CAPTURED"].includes(auth.status)) throw new Error(`Authorization cannot be captured (status ${auth.status})`);
     const capture = await this.request(`/v2/payments/authorizations/${encodeURIComponent(authId)}/capture`, { method: "POST", requestId, body: { amount: { currency_code: "USD", value: amount(cents) }, final_capture: true } });
@@ -149,8 +161,8 @@ export class PayPalSandbox {
     return { captureId: capture.id, status: verified?.status || capture.status };
   }
 
-  async voidAuthorization(authId, { cents, requestId }) {
-    const auth = await this.verifiedAuthorization(authId, cents);
+  async voidAuthorization(authId, { cents, requestId, orderId }) {
+    const auth = await this.verifiedAuthorization(authId, cents, orderId);
     if (auth.status === "CREATED" || auth.status === "PENDING") {
       await this.request(`/v2/payments/authorizations/${encodeURIComponent(authId)}/void`, { method: "POST", body: {}, requestId });
     } else if (auth.status !== "VOIDED") throw new Error(`Authorization cannot be voided (status ${auth.status})`);

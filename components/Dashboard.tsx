@@ -102,7 +102,7 @@ export default function Dashboard() {
     finally { setConfirming(null); await refresh(passcode); setBusy(null); }
   }
   const upload = (stage: "before" | "after", file: File) => {
-    if (file.size > 6 * 1024 * 1024) { setNotice({ text: "Images must be 6 MB or smaller.", ok: false }); return; }
+    if (file.size > 4 * 1024 * 1024) { setNotice({ text: "Images must be 4 MB or smaller.", ok: false }); return; }
     const form = new FormData(); form.append("stage", stage); form.append("file", file);
     void act(`upload-${stage}`, `/api/items/${selected.id}/upload`, undefined, form);
   };
@@ -185,7 +185,7 @@ export default function Dashboard() {
 
           <section className="file-section">
             <h3><span className="sec-num">{ROMAN[1]}</span>Funds hold<small>PayPal Orders v2 · AUTHORIZE</small></h3>
-            {selected.paypal_auth_id ? <p className="hold-line"><ShieldCheck size={16} aria-hidden="true" /><span>{money(selected.amount_cents)} authorized by the homeowner and held by PayPal for this item only. Nothing is charged until the homeowner decides.<code>{selected.paypal_auth_id}</code></span></p>
+            {selected.paypal_auth_id ? <p className="hold-line"><ShieldCheck size={16} aria-hidden="true" /><span>{selected.state === "captured" ? <>The {money(selected.amount_cents)} hold was captured after the homeowner accepted the work.</> : selected.state === "voided" ? <>The {money(selected.amount_cents)} hold was voided after the homeowner rejected the work.</> : <>{money(selected.amount_cents)} authorized by the homeowner and held by PayPal for this item only. Nothing is charged until the homeowner decides.</>}<code>{selected.paypal_auth_id}</code></span></p>
               : role === "homeowner" && live && meta?.paypal.configured && meta.paypal.clientId ? <div className="hold-action">
                 <p>Approve a hold of <b>{money(selected.amount_cents)}</b> for this fix. PayPal reserves the funds; nothing is captured now.</p>
                 <PayPalButton clientId={meta.paypal.clientId} itemId={selected.id} passcode={passcode} onSettled={(text, ok) => { setNotice({ text, ok }); void refresh(passcode); }} />
@@ -201,7 +201,7 @@ export default function Dashboard() {
               <EvidencePane stage="after" src={selected.after_url} hasPhoto={!!selected.after_path} canUpload={canUpload} busy={!!busy} onUpload={(f) => upload("after", f)} />
             </div>
             {busy?.startsWith("upload") && <p className="inline-note" role="status">Uploading and checking the image…</p>}
-            {role === "contractor" && <p className="fine">{canUpload ? "JPG, PNG or WebP up to 6 MB. Photos are stored privately and shown through short-lived links. Replacing a photo clears the previous review." : selected.paypal_auth_id ? "Evidence is locked once the homeowner has decided." : "Photos can be submitted once the homeowner has approved this hold."}</p>}
+            {role === "contractor" && <p className="fine">{canUpload ? "JPG, PNG or WebP up to 4 MB. Photos are stored privately and shown through short-lived links. Replacing a photo clears the previous review." : selected.paypal_auth_id ? "Evidence is locked once the homeowner has decided." : "Photos can be submitted once the homeowner has approved this hold."}</p>}
           </section>
 
           <section className="file-section">

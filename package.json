@@ -10,7 +10,8 @@
     "test:payments": "node --test tests/*.test.mjs",
     "sandbox:create": "node --env-file=.env.local scripts/paypal-smoke.mjs create",
     "sandbox:settle": "node --env-file=.env.local scripts/paypal-smoke.mjs settle",
-    "sandbox:verify": "node --env-file=.env.local scripts/paypal-smoke.mjs verify"
+    "sandbox:verify": "node --env-file=.env.local scripts/paypal-smoke.mjs verify",
+    "test:db": "bash scripts/test-db.sh"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.6.0",

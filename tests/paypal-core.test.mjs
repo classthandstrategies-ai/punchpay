@@ -84,6 +84,33 @@ test("lost authorize response is recovered from COMPLETED order without a second
   assert.equal(calls.filter((c) => c.method === "POST" && c.url.includes("/v2/")).length, 0);
 });
 
+test("a denied or voided authorization is never recorded as an open hold", async () => {
+  for (const status of ["DENIED", "VOIDED", "PENDING"]) {
+    const done = orderOf({ status: "COMPLETED" });
+    done.purchase_units[0].payments = { authorizations: [{ id: "AUTH", status, amount: money("30.00") }] };
+    const { client } = fake([["GET", /^\/v2\/checkout\/orders\/ORD$/, done]]);
+    await assert.rejects(() => client.authorizeApproved("ORD", { referenceId: "item-1", cents: 3000, requestId: "r" }), /not an open hold/);
+  }
+});
+
+test("authorization without payee is verified through its parent order, never skipped", async () => {
+  const parent = orderOf({ status: "COMPLETED" });
+  parent.purchase_units[0].payments = { authorizations: [{ id: "AUTH", status: "CREATED" }] };
+  const ok = fake([
+    ["GET", /authorizations\/AUTH$/, { id: "AUTH", status: "CREATED", amount: money("30.00"), supplementary_data: { related_ids: { order_id: "ORD" } } }],
+    ["GET", /^\/v2\/checkout\/orders\/ORD$/, parent]
+  ]);
+  assert.equal((await ok.client.verifiedAuthorization("AUTH", 3000)).payeeVerifiedVia, "parent_order");
+  const otherPayee = structuredClone(parent); otherPayee.purchase_units[0].payee.merchant_id = "SOMEONE-ELSE";
+  const bad = fake([["GET", /authorizations\/AUTH$/, { id: "AUTH", status: "CREATED", amount: money("30.00") }], ["GET", /orders\/ORD$/, otherPayee]]);
+  await assert.rejects(() => bad.client.verifiedAuthorization("AUTH", 3000, "ORD"), /mismatch/);
+  const orphan = fake([["GET", /authorizations\/AUTH$/, { id: "AUTH", status: "CREATED", amount: money("30.00") }]]);
+  await assert.rejects(() => orphan.client.verifiedAuthorization("AUTH", 3000), /cannot verify who is paid/);
+  const unrelated = structuredClone(parent); unrelated.purchase_units[0].payments.authorizations = [{ id: "OTHER" }];
+  const wrongParent = fake([["GET", /authorizations\/AUTH$/, { id: "AUTH", status: "CREATED", amount: money("30.00") }], ["GET", /orders\/ORD$/, unrelated]]);
+  await assert.rejects(() => wrongParent.client.verifiedAuthorization("AUTH", 3000, "ORD"), /does not contain/);
+});
+
 test("capture verifies payee and amount first and refuses a voided authorization", async () => {
   const { calls, client } = fake([["GET", /authorizations\/AUTH$/, { id: "AUTH", status: "VOIDED", amount: money("30.00"), payee: { merchant_id: M } }]]);
   await assert.rejects(() => client.captureAuthorization("AUTH", { cents: 3000, requestId: "r" }), /cannot be captured/);

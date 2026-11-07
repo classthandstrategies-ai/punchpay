@@ -8,3 +8,8 @@ node_modules
 .vercel
 *.tsbuildinfo
 .playwright-mcp
+.tmp-pg
+.tmp-pg-tmp
+supabase/.temp
+supabase/.branches
+.tmp-pg-tmp2
