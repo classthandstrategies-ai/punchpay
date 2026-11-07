@@ -15,3 +15,8 @@ supabase/.branches
 .tmp-pg-tmp2
 test-results
 playwright-report
+# Internal / local-only files (kept out of public history)
+CLAUDE.local.md
+AGENTS.md
+CLAUDE-KICKOFF-PROMPT.md
+TEAM-PLAN.md

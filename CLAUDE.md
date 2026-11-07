@@ -1,6 +1,6 @@
 # PunchPay | Claude Code Operating Brief
 
-You are the lead engineer and design-quality reviewer for PunchPay, a 3-person team project for the PayPal AI Hackathon 2026. Source is a NEW isolated project, unrelated to Accessly. Do not read or change any Accessly repo, worktree, deployment, credentials, or SSD assets.
+You are the lead engineer and design-quality reviewer for PunchPay, a 3-person team project for the PayPal AI Hackathon 2026. PunchPay is a standalone project: keep all work, credentials and assets within this repository and its dedicated sandbox accounts.
 
 ## Nonnegotiable outcome
 Build and test a polished, functional Next.js + TypeScript + Supabase/Postgres + Claude Vision + PayPal sandbox application by the submission deadline: **November 12, 2026 at 12:00 PM PST (November 13, 2026 at 1:30 AM IST)**.
