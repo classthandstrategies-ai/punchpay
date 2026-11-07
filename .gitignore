@@ -1,0 +1,9 @@
+node_modules
+.next
+.env*
+!.env.example
+.paypal-sandbox-state.json
+*.log
+.DS_Store
+.vercel
+*.tsbuildinfo
