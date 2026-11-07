@@ -1,129 +1,271 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowUpRight, ArrowRight, Check, CheckCheck, ChevronRight, CircleAlert, CircleCheck, ClipboardCheck, Clock3, FileCheck2, House, ImagePlus, LockKeyhole, RefreshCcw, ShieldCheck, Sparkles, X, Zap } from "lucide-react";
-import type { PunchItem, AIReport, AuditEvent } from "@/lib/types";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ArrowRight, Check, LockKeyhole, RefreshCcw, ShieldCheck, Sparkles, X } from "lucide-react";
+import type { AuditEvent, PunchItem } from "@/lib/types";
 import PayPalButton from "./PayPalButton";
+import { AdvisoryReport, EvidencePane, Ledger, StatusTag, Timeline, cx, money, when } from "./parts";
 
-const preview: PunchItem[] = [
-  { id: "preview-paint", project_id: "preview", slug: "paint", title: "Paint touch-up", location: "Living room · North wall", description: "Repair the scuffed paint beside the window.", acceptance_criteria: "Scuff no longer visibly apparent; finish is reasonably uniform. Include a context shot and close-up.", amount_cents: 3000, currency: "USD", state: "awaiting_authorization", paypal_order_id: null, paypal_auth_id: null, paypal_capture_id: null, paypal_status: null, payee_merchant_id: null, before_path: null, after_path: null, before_url: null, after_url: null, ai_review: null, homeowner_decision: null, decision_at: null, order_attempt: 1, last_error: null },
-  { id: "preview-tile", project_id: "preview", slug: "tile", title: "Tile repair", location: "Kitchen · Backsplash", description: "Replace the cracked tile near the sink.", acceptance_criteria: "Tile appears uncracked and aligned with adjacent tiles; grout line visually continuous. Include repair close-up.", amount_cents: 2000, currency: "USD", state: "awaiting_authorization", paypal_order_id: null, paypal_auth_id: null, paypal_capture_id: null, paypal_status: null, payee_merchant_id: null, before_path: null, after_path: null, before_url: null, after_url: null, ai_review: null, homeowner_decision: null, decision_at: null, order_attempt: 1, last_error: null }
+type Role = "homeowner" | "contractor";
+type Meta = { paypal: { configured: boolean; clientId: string | null }; ai: { configured: boolean } };
+
+const base = { project_id: "preview", currency: "USD" as const, state: "awaiting_authorization" as const, paypal_order_id: null, paypal_auth_id: null, paypal_capture_id: null, paypal_status: null, payee_merchant_id: null, before_path: null, after_path: null, before_url: null, after_url: null, ai_review: null, homeowner_decision: null, decision_at: null, order_attempt: 1, last_error: null };
+const PREVIEW: PunchItem[] = [
+  { ...base, id: "preview-paint", slug: "paint", title: "Paint touch-up", location: "Living room · North wall", description: "Repair the scuffed paint beside the window.", acceptance_criteria: "Scuff no longer visibly apparent; finish is reasonably uniform in submitted after-photo; include a wide context shot and a close-up.", amount_cents: 3000 },
+  { ...base, id: "preview-tile", slug: "tile", title: "Tile repair", location: "Kitchen · Backsplash", description: "Replace the cracked tile near the sink.", acceptance_criteria: "Tile appears uncracked and aligned with adjacent tiles; grout line visually continuous; include before photo and clear close-up of repair.", amount_cents: 2000 }
 ];
-const status: Record<string, { text: string; className: string }> = {
-  awaiting_authorization: { text: "Awaiting approval", className: "neutral" },
-  order_created: { text: "Awaiting PayPal", className: "amber" },
-  authorized: { text: "Funds authorized", className: "blue" },
-  submitted: { text: "Evidence ready", className: "blue" },
-  reviewed: { text: "Ready for decision", className: "amber" },
-  capture_pending: { text: "Capture processing", className: "amber" },
-  captured: { text: "Paid", className: "green" },
-  void_pending: { text: "Void processing", className: "amber" },
-  voided: { text: "Released", className: "stone" },
-  payment_error: { text: "Reconciliation needed", className: "red" }
-};
-const currency = (cents: number) => `$${(cents / 100).toFixed(2)}`;
-function classJoin(...parts: (string | false | null | undefined)[]) { return parts.filter(Boolean).join(" "); }
+const ROMAN = ["I", "II", "III", "IV", "V", "VI"];
+const STEPS = ["Funds held", "Photos", "Review", "Decision"];
 
-function EvidenceTile({ src, label, eyebrow, onUpload, disabled }: { src?: string | null; label: string; eyebrow: string; onUpload?: (f: File) => void; disabled?: boolean }) {
-  const input = useRef<HTMLInputElement>(null);
-  return <div className="evidence-tile">
-    <div className="evidence-visual">
-      {src ? <img src={src} alt={`${label} uploaded evidence`} /> : <div className="evidence-placeholder"><div className="placeholder-illustration"><House size={43} strokeWidth={1.15} /><span /></div><span>No image uploaded</span></div>}
-      {onUpload && <button disabled={disabled} className="evidence-upload" title={`Upload ${label.toLowerCase()} photo`} onClick={() => input.current?.click()}><ImagePlus size={16} /></button>}
-      <input ref={input} type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f && onUpload) onUpload(f); e.target.value = ""; }} />
-    </div>
-    <div className="evidence-caption"><div><small>{eyebrow}</small><b>{label}</b></div><span className={src ? "photo-indicator ready" : "photo-indicator"}>{src ? <Check size={13} /> : <ImagePlus size={13} />}</span></div>
-  </div>;
+function stepIndex(state: PunchItem["state"]) {
+  if (state === "awaiting_authorization" || state === "order_created") return 0;
+  if (state === "authorized") return 1;
+  if (state === "submitted") return 2;
+  if (state === "reviewed") return 3;
+  return 4;
 }
-function AIReview({ report }: { report: AIReport | null }) {
-  if (!report) return <div className="empty-analysis"><div className="sparkle-orbit"><Sparkles size={22} /></div><b>Evidence, not assumptions.</b><p>Once both photos are submitted, Claude will compare only what is visible against the agreed criteria.</p></div>;
-  return <div className="ai-report">
-    <div className="ai-verdict"><span className={classJoin("verdict-icon", report.assessment === "appears_satisfied" ? "good" : report.assessment === "visible_concern" ? "concern" : "uncertain")}><Sparkles size={17} /></span><div><small>AI assessment</small><b>{report.assessment === "appears_satisfied" ? "Appears to meet criteria" : report.assessment === "visible_concern" ? "Visible concerns found" : "Insufficient evidence"}</b></div></div>
-    <p className="ai-summary">{report.summary}</p>
-    <div className="review-criteria">{report.criteria?.map((criterion, i) => <div className="review-row" key={i}><span className={classJoin("review-bullet", criterion.result)}>{criterion.result === "supported" ? <Check size={12} /> : criterion.result === "not_supported" ? <X size={12} /> : <CircleAlert size={12} />}</span><span><b>{criterion.criterion}</b><small>{criterion.evidence}</small></span></div>)}</div>
-    {report.uncertainty?.length > 0 && <p className="uncertainty"><CircleAlert size={13} /> {report.uncertainty.join(" ")}</p>}
-    <div className="ai-footer">{report.source === "live_model" ? "Live Claude analysis" : "Sample fixture, not live AI"}<span>Human decision required</span></div>
-  </div>;
+function nextStep(item: PunchItem): { who: Role | null; text: string } {
+  switch (item.state) {
+    case "awaiting_authorization": case "order_created": return { who: "homeowner", text: `Approve a ${money(item.amount_cents)} hold for this fix in PayPal.` };
+    case "authorized": return { who: "contractor", text: item.before_path ? "Upload the after photo." : item.after_path ? "Upload the before photo." : "Upload a before and an after photo." };
+    case "submitted": return { who: "contractor", text: "Run the advisory evidence review." };
+    case "reviewed": return { who: "homeowner", text: "Read the evidence and decide: accept and pay, or reject and release." };
+    case "capture_pending": case "void_pending": return { who: null, text: "PayPal is processing. Reconcile to confirm the outcome." };
+    case "payment_error": return { who: null, text: "The payment response was not confirmed. Reconcile with PayPal; do not retry blindly." };
+    default: return { who: null, text: "Closed. The outcome below is the status PayPal reported." };
+  }
 }
+const ss = { get: (k: string) => { try { return sessionStorage.getItem(k) || ""; } catch { return ""; } }, set: (k: string, v: string) => { try { sessionStorage.setItem(k, v); } catch { /* storage unavailable */ } } };
 
 export default function Dashboard() {
-  const [items, setItems] = useState<PunchItem[]>(preview);
+  const [items, setItems] = useState<PunchItem[]>(PREVIEW);
   const [audit, setAudit] = useState<AuditEvent[]>([]);
-  const [selectedId, setSelectedId] = useState("preview-paint");
-  const [role, setRole] = useState<"homeowner" | "contractor">("homeowner");
+  const [meta, setMeta] = useState<Meta | null>(null);
+  const [selectedId, setSelectedId] = useState(PREVIEW[0].id);
+  const [role, setRoleState] = useState<Role>("homeowner");
   const [passcode, setPasscode] = useState("");
-  const [editPasscode, setEditPasscode] = useState("");
-  const [notice, setNotice] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [live, setLive] = useState(false);
-  const [payPalConfigured, setPayPalConfigured] = useState(false);
-  const clientId = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || "";
-  const refresh = useCallback(async () => {
+  const [draft, setDraft] = useState("");
+  const [connection, setConnection] = useState<{ live: boolean; reason: string }>({ live: false, reason: "Connecting…" });
+  const [busy, setBusy] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ text: string; ok: boolean } | null>(null);
+  const [confirming, setConfirming] = useState<"accepted" | "rejected" | null>(null);
+
+  const refresh = useCallback(async (code: string) => {
+    if (!code) { setConnection({ live: false, reason: "Enter the demo passcode to load the live sandbox project." }); return; }
     try {
-      const response = await fetch("/api/items", { cache: "no-store", headers: { "x-demo-passcode": passcode } });
-      if (!response.ok) throw new Error("Backend not connected");
-      const json = await response.json();
-      if (!Array.isArray(json.items)) throw new Error("Invalid backend response");
+      const res = await fetch("/api/items", { cache: "no-store", headers: { "x-demo-passcode": code } });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || `Backend unavailable (${res.status})`);
       const next = json.items as PunchItem[];
-      setItems(next);
-      setAudit(Array.isArray(json.audit) ? json.audit : []);
-      setLive(true);
-      setPayPalConfigured(!!json.paypal?.configured);
-      setSelectedId((previous) => next.find(i => i.id === previous) ? previous : (next.find(i => i.slug === "paint")?.id || next[0]?.id || ""));
-    } catch { setLive(false); setItems(preview); setAudit([]); }
-  }, [passcode]);
-  useEffect(() => { const saved = sessionStorage.getItem("punchpay_demo_passcode") || ""; setPasscode(saved); setEditPasscode(saved); refresh(); }, [refresh]);
-  const selected = items.find(i => i.id === selectedId) || items[0];
-  const total = items.reduce((s, item) => s + item.amount_cents, 0);
-  const paid = items.filter(i => i.state === "captured").reduce((s, item) => s + item.amount_cents, 0);
-  const released = items.filter(i => i.state === "voided").reduce((s, item) => s + item.amount_cents, 0);
-  const completed = items.filter(i => ["captured", "voided"].includes(i.state)).length;
-  const ready = !!passcode && live;
-  async function act(path: string, body?: unknown, multipart?: FormData) {
-    setBusy(true); setNotice("");
+      setItems(next); setAudit(json.audit || []); setMeta({ paypal: json.paypal, ai: json.ai });
+      setConnection({ live: true, reason: "" });
+      setSelectedId((prev) => next.some((i) => i.id === prev) ? prev : next[0]?.id || "");
+    } catch (e) {
+      setConnection({ live: false, reason: e instanceof Error ? e.message : "Backend unavailable" });
+      setItems(PREVIEW); setAudit([]); setMeta(null); setSelectedId((prev) => PREVIEW.some((i) => i.id === prev) ? prev : PREVIEW[0].id);
+    }
+  }, []);
+
+  useEffect(() => {
+    const saved = ss.get("punchpay_passcode"); const savedRole = ss.get("punchpay_role");
+    if (savedRole === "contractor" || savedRole === "homeowner") setRoleState(savedRole);
+    setPasscode(saved); setDraft(saved); void refresh(saved);
+  }, [refresh]);
+  useEffect(() => {
+    const onFocus = () => { if (passcode) void refresh(passcode); }; // signed image URLs are short-lived
+    window.addEventListener("focus", onFocus); return () => window.removeEventListener("focus", onFocus);
+  }, [passcode, refresh]);
+
+  const setRole = (r: Role) => { setRoleState(r); ss.set("punchpay_role", r); setConfirming(null); };
+  const unlock = (e: React.FormEvent) => { e.preventDefault(); setPasscode(draft); ss.set("punchpay_passcode", draft); void refresh(draft); };
+  const lock = () => { setPasscode(""); setDraft(""); ss.set("punchpay_passcode", ""); void refresh(""); };
+
+  const selected = items.find((i) => i.id === selectedId) || items[0];
+  const live = connection.live;
+  const totals = useMemo(() => ({
+    all: items.reduce((s, i) => s + i.amount_cents, 0),
+    held: items.filter((i) => ["authorized", "submitted", "reviewed", "capture_pending", "void_pending", "payment_error"].includes(i.state)).reduce((s, i) => s + i.amount_cents, 0),
+    paid: items.filter((i) => i.state === "captured").reduce((s, i) => s + i.amount_cents, 0),
+    released: items.filter((i) => i.state === "voided").reduce((s, i) => s + i.amount_cents, 0),
+    closed: items.filter((i) => i.state === "captured" || i.state === "voided").length
+  }), [items]);
+
+  async function act(key: string, path: string, body?: object, form?: FormData) {
+    setBusy(key); setNotice(null);
     try {
-      const response = await fetch(path, { method: "POST", headers: { "x-demo-passcode": passcode, ...(multipart ? {} : { "Content-Type": "application/json" }) }, ...(multipart ? { body: multipart } : { body: JSON.stringify(body || {}) }) });
-      const json = await response.json();
-      if (!response.ok) throw new Error(json.error || "Action unsuccessful");
-      await refresh();
-      setNotice("Updated. Payment details are shown only when confirmed by PayPal.");
-    } catch (error) { setNotice(error instanceof Error ? error.message : "Action failed"); }
-    finally { setBusy(false); }
+      const res = await fetch(path, { method: "POST", headers: { "x-demo-passcode": passcode, ...(form ? {} : { "Content-Type": "application/json" }) }, body: form ?? JSON.stringify(body ?? {}) });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || `Request failed (${res.status})`);
+      if (json.message) setNotice({ text: json.message, ok: true });
+      else if (json.capture_id) setNotice({ text: `PayPal capture ${json.capture_id} · ${json.paypal_status}`, ok: true });
+      else if (json.authorization_id && json.state === "voided") setNotice({ text: `Authorization ${json.authorization_id} · ${json.paypal_status}`, ok: true });
+    } catch (e) { setNotice({ text: e instanceof Error ? e.message : "Action failed", ok: false }); }
+    finally { setConfirming(null); await refresh(passcode); setBusy(null); }
   }
-  const upload = (stage: "before" | "after", file: File) => { if (!selected) return; const form = new FormData(); form.append("stage", stage); form.append("file", file); void act(`/api/items/${selected.id}/upload`, undefined, form); };
-  const uploadAllowed = ready && ["authorized", "submitted", "reviewed"].includes(selected?.state || "");
-  return <div className="shell">
-    <aside className="sidebar">
-      <a className="brand" href="/"><span className="brand-mark"><span className="mark-outline" /><Check size={18} strokeWidth={3} /></span><span>Punch<span className="brand-accent">Pay</span><small>RENOVATION CLOSEOUT</small></span></a>
-      <div className="side-workspace"><div className="workspace-symbol">O</div><span>Oak Street Project<small>Residential renovation</small></span><ChevronRight size={15} /></div>
-      <div className="side-label">WORKSPACE</div>
-      <nav className="side-nav" aria-label="Navigation"><div className="nav-active"><ClipboardCheck size={17} /> Punch list <span>02</span></div><div className="nav-muted"><FileCheck2 size={17} /> Evidence reports</div><div className="nav-muted"><ShieldCheck size={17} /> Payment ledger</div></nav>
-      <div className="sidebar-bottom"><div className="sandbox-box"><span className="sandbox-led" /><b>PayPal Sandbox</b><small>Testing mode · No real money</small></div><div className="profile"><div className="avatar">AM</div><span>Alex Morgan<small>Homeowner · Demo</small></span><span className="profile-dots">···</span></div></div>
-    </aside>
-    <main className="main">
-      <header className="topbar"><div className="breadcrumb">Projects <ChevronRight size={13} /> Oak Street <ChevronRight size={13} /><strong>Closeout</strong></div><div className="topbar-actions"><span className="top-status"><span /> Sandbox environment</span><span className="top-avatar">AM</span></div></header>
-      <div className="content">
-        <div className="intro-row"><div><div className="eyebrow"><span className="mini-line" /> PROJECT CLOSEOUT / 001</div><h1>Finish well.<br /><em>Settle fairly.</em></h1><p className="intro-sub">A clearer way to complete the last 1% of a renovation.<br className="desktop-break" /> Every fix has evidence, a decision, and its own payment outcome.</p></div><div className="intro-meta"><div className="round-icon"><House size={19} /></div><span>THE OAK STREET RENOVATION<small>Austin, Texas · Mason & Co.</small></span></div></div>
-        <section className="metrics" aria-label="Closeout overview"><div className="metric"><small>Total at stake</small><strong>{currency(total)}</strong><span>Across {items.length} independent items</span></div><div className="metric"><small>Paid to contractor</small><strong>{currency(paid)}</strong><span><span className="dot green" /> Captured in PayPal</span></div><div className="metric"><small>Released to homeowner</small><strong>{currency(released)}</strong><span><span className="dot stone" /> Voided authorizations</span></div><div className="metric metric-progress"><small>Closeout progress</small><strong>{completed}<span>/{items.length}</span></strong><div className="meter"><div style={{width:`${items.length ? 100*completed/items.length : 0}%`}}/></div></div></section>
-        <div className="list-heading"><div><div className="section-kicker">01 / REVIEW & DECIDE</div><h2>Outstanding work <span>({items.length})</span></h2></div><div className="role-switch" aria-label="Switch demo role"><button className={role === "homeowner" ? "active" : ""} onClick={() => setRole("homeowner")}>Homeowner</button><button className={role === "contractor" ? "active" : ""} onClick={() => setRole("contractor")}>Contractor</button></div></div>
-        <div className="workspace-grid"><div className="items-column"><p className="list-helper">Each fix has its own approval, evidence, and PayPal authorization.</p><div className="items-list">{items.map((item, i) => <button key={item.id} className={classJoin("item-card", selected?.id === item.id && "is-selected")} onClick={() => setSelectedId(item.id)}><div className="item-top"><span className="item-index">{String(i+1).padStart(2, "0")}</span><span className={classJoin("status-pill", status[item.state]?.className)}><span className="status-dot"/>{status[item.state]?.text || item.state}</span></div><div className="item-info"><div><h3>{item.title}</h3><p>{item.location}</p></div><span className="item-price">{currency(item.amount_cents)}</span></div><div className="item-bottom"><span>{item.paypal_auth_id ? <ShieldCheck size={15} /> : <Clock3 size={15} />}{item.paypal_auth_id ? "Individually authorized" : "PayPal approval required"}</span><span className="card-arrow"><ArrowUpRight size={16} /></span></div></button>)}</div><div className="trust-note"><ShieldCheck size={20}/><div><b>No blind approvals.</b><span>AI reviews visual evidence. You remain in control of what gets paid.</span></div></div></div>
-        {selected && <section className="detail-panel"><div className="panel-top"><div><div className="panel-eyebrow">ITEM {items.indexOf(selected)+1} OF {items.length} <span>/</span> INSPECTION FILE</div><h2>{selected.title}</h2><p>{selected.description}</p></div><span className="panel-amount">{currency(selected.amount_cents)}<small>FIX VALUE</small></span></div>
-          <div className="criteria-block"><div className="block-icon"><ClipboardCheck size={17} /></div><div><small>AGREED ACCEPTANCE CRITERIA</small><p>{selected.acceptance_criteria}</p></div></div>
-          <div className="panel-section"><div className="panel-section-head"><h3>Photo evidence</h3><span>BEFORE / AFTER</span></div><div className="evidence-grid"><EvidenceTile label="Before" eyebrow="01 · ORIGINAL" src={selected.before_url} disabled={busy} onUpload={role === "contractor" && uploadAllowed ? f => upload("before",f) : undefined} /><EvidenceTile label="After" eyebrow="02 · COMPLETED" src={selected.after_url} disabled={busy} onUpload={role === "contractor" && uploadAllowed ? f => upload("after",f) : undefined} /></div>{role === "contractor" && <p className="micro-caption">{uploadAllowed ? "Click the upload icon to add or replace a photo (JPG, PNG, WebP, up to 6 MB)." : "Photos can be uploaded after homeowner PayPal authorization."}</p>}</div>
-          <div className="panel-section ai-section"><div className="panel-section-head"><h3><span className="ai-emblem"><Sparkles size={15}/></span> AI evidence review</h3><span>ADVISORY ONLY</span></div><AIReview report={selected.ai_review} />{role === "contractor" && ["submitted", "reviewed"].includes(selected.state) && <button disabled={busy || !ready} className="secondary-button full" onClick={() => void act(`/api/items/${selected.id}/review`)}><Sparkles size={16}/> {selected.ai_review ? "Rerun Claude review" : "Analyze evidence with Claude"}</button>}</div>
-          <div className="decision-block"><div className="decision-heading"><div className="decision-icon"><LockKeyhole size={17}/></div><span><b>{role === "homeowner" ? "Your decision, your control" : "Ready for homeowner sign-off"}</b><small>Payment moves only after the homeowner decides.</small></span></div>
-          {selected.state === "captured" || selected.state === "voided" ? <div className={classJoin("terminal-state", selected.state === "captured" ? "paid" : "released")}><span>{selected.state === "captured" ? <CircleCheck size={22} /> : <CheckCheck size={22}/>}</span><div><b>{selected.state === "captured" ? "Accepted · Payment captured" : "Rejected · Authorization voided"}</b><small>PayPal verified: {selected.paypal_status || selected.state.toUpperCase()}{selected.paypal_capture_id ? ` · ${selected.paypal_capture_id}` : selected.paypal_auth_id ? ` · ${selected.paypal_auth_id}` : ""}</small></div></div>
-          : selected.state === "reviewed" ? role === "homeowner" ? <div className="decision-buttons"><button disabled={busy || !ready} className="accept-button" onClick={() => {if (window.confirm(`Accept ${selected.title} and capture ${currency(selected.amount_cents)} from its separate PayPal authorization?`)) void act(`/api/items/${selected.id}/decision`, {decision:"accepted"});}}><Check size={17}/> Accept & pay {currency(selected.amount_cents)}</button><button disabled={busy || !ready} className="reject-button" onClick={() => {if (window.confirm(`Reject ${selected.title} and void its PayPal authorization for ${currency(selected.amount_cents)}?`)) void act(`/api/items/${selected.id}/decision`, {decision:"rejected"});}}><X size={16}/> Reject & release</button></div> : <p className="decision-message">Evidence reviewed. Switch to the homeowner role to make the decision.</p>
-          : selected.state === "awaiting_authorization" || selected.state === "order_created" ? role === "homeowner" && ready && clientId && payPalConfigured ? <div className="paypal-wrap"><p>Authorize <b>{currency(selected.amount_cents)}</b> separately in the PayPal sandbox. No capture occurs yet.</p><PayPalButton key={selected.id} clientId={clientId} itemId={selected.id} passcode={passcode} onComplete={refresh}/></div> : <p className="decision-message">{!ready ? "Connect the backend and set your demo access passcode to begin PayPal sandbox approval." : role !== "homeowner" ? "Waiting for homeowner to authorize this item with PayPal." : "Configure PayPal sandbox client ID to start approvals."}</p>
-          : <div className="pending-state"><Clock3 size={16}/><span>{selected.state === "authorized" ? "Authorized. Contractor can now submit before-and-after photos." : selected.state === "submitted" ? "Evidence submitted. Run Claude review before deciding." : "Payment state requires verification or reconciliation."}</span></div>}
-          {selected.state === "payment_error" || selected.state === "capture_pending" || selected.state === "void_pending" ? <button disabled={busy || !ready} className="secondary-button full" onClick={() => void act(`/api/items/${selected.id}/sync`)}><RefreshCcw size={15}/> Reconcile with PayPal</button> : null}
-          </div>
-          <div className="audit-block"><div className="panel-section-head"><h3><Clock3 size={15}/> Decision trail</h3><span>PER ITEM · APPENDED EVENTS</span></div>{audit.filter(event => event.item_id === selected.id).slice(0,5).length ? <div className="audit-list">{audit.filter(event => event.item_id === selected.id).slice(0,5).map(event => <div key={event.id} className="audit-event"><span className="audit-stem"><span/></span><div><b>{event.action.replaceAll("_", " ")}</b><small>{event.actor} · {new Date(event.created_at).toLocaleString("en-US",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})}</small></div></div>)}</div> : <p className="audit-empty">No recorded activity yet. Authorization and evidence events will appear here.</p>}</div>
-          <div className="panel-end"><ShieldCheck size={14}/><span>Not escrow. Authorization is time-limited. AI never approves payments.</span></div>
-        </section>}</div>
-        <footer className="page-footer"><span>PUNCHPAY / BUILT FOR THE PAYPAL AI HACKATHON 2026</span><span>Made for the moments that deserve proof. <ArrowRight size={13}/></span></footer>
+  const upload = (stage: "before" | "after", file: File) => {
+    if (file.size > 6 * 1024 * 1024) { setNotice({ text: "Images must be 6 MB or smaller.", ok: false }); return; }
+    const form = new FormData(); form.append("stage", stage); form.append("file", file);
+    void act(`upload-${stage}`, `/api/items/${selected.id}/upload`, undefined, form);
+  };
+
+  const step = nextStep(selected);
+  const idx = items.indexOf(selected);
+  const canUpload = live && role === "contractor" && ["authorized", "submitted", "reviewed"].includes(selected.state);
+  const itemEvents = audit.filter((e) => e.item_id === selected.id);
+  const isTerminal = selected.state === "captured" || selected.state === "voided";
+
+  return <div className="page">
+    <header className="masthead">
+      <a className="wordmark" href="/" aria-label="PunchPay home"><span className="mark" aria-hidden="true"><Check size={14} strokeWidth={3} /></span>PunchPay</a>
+      <p className="masthead-meta"><span>Closeout dossier</span><span>No. 001</span><span>Oak Street, Austin TX</span></p>
+      <div className="masthead-controls">
+        <div className="role-switch" role="radiogroup" aria-label="Viewing as">
+          <span className="role-label">Viewing as</span>
+          {(["homeowner", "contractor"] as Role[]).map((r) => <button key={r} type="button" role="radio" aria-checked={role === r} className={cx(role === r && "is-on")} onClick={() => setRole(r)}>{r === "homeowner" ? "Homeowner" : "Contractor"}</button>)}
+        </div>
+        <span className="sandbox-flag" title="All payments use the PayPal sandbox. No real money moves.">Sandbox</span>
       </div>
+    </header>
+
+    {!live && <div className="access-band" role="region" aria-label="Demo access">
+      <p><LockKeyhole size={15} aria-hidden="true" /><span><b>Design preview.</b> {connection.reason}</span></p>
+      <form onSubmit={unlock}>
+        <label className="sr-only" htmlFor="passcode">Demo passcode</label>
+        <input id="passcode" type="password" autoComplete="off" placeholder="Demo passcode" value={draft} onChange={(e) => setDraft(e.target.value)} />
+        <button type="submit" className="btn btn-ink">Unlock</button>
+      </form>
+    </div>}
+
+    <main>
+      <section className="cover" aria-labelledby="cover-title">
+        <div className="cover-text">
+          <p className="kicker">Project closeout · Two outstanding fixes</p>
+          <h1 id="cover-title">Every fix reviewed.<br /><em>Every payment decided.</em></h1>
+          <p className="lede">Each fix has its own PayPal hold, its own photo evidence and its own decision. Claude describes what the photos show; the homeowner alone decides what gets paid.</p>
+        </div>
+        <dl className="tally" aria-label="Payment summary">
+          <div><dt>Under contract</dt><dd>{money(totals.all)}</dd></div>
+          <div><dt>Held in PayPal</dt><dd>{money(totals.held)}</dd></div>
+          <div className="t-paid"><dt>Paid to contractor</dt><dd>{money(totals.paid)}</dd></div>
+          <div className="t-released"><dt>Released to homeowner</dt><dd>{money(totals.released)}</dd></div>
+          <p className="tally-foot">{totals.closed} of {items.length} items closed · amounts from PayPal-verified states</p>
+        </dl>
+      </section>
+
+      <div className="dossier">
+        <nav className="item-index" aria-label="Punch list items">
+          <p className="index-head">Punch list</p>
+          {items.map((item, i) => <button key={item.id} type="button" className={cx("index-entry", item.id === selected.id && "is-current")} aria-current={item.id === selected.id ? "true" : undefined} onClick={() => { setSelectedId(item.id); setConfirming(null); }}>
+            <span className="ie-num">{String(i + 1).padStart(2, "0")}</span>
+            <span className="ie-main"><b>{item.title}</b><small>{item.location}</small><StatusTag state={item.state} /></span>
+            <span className="ie-amount">{money(item.amount_cents)}</span>
+          </button>)}
+          <p className="index-note"><ShieldCheck size={14} aria-hidden="true" />Each item is a separate PayPal authorization. Rejecting one never affects the other.</p>
+        </nav>
+
+        <article className="item-file" aria-labelledby="item-title" key={selected.id}>
+          <header className="file-head">
+            <p className="file-ref">Item {String(idx + 1).padStart(2, "0")} of {String(items.length).padStart(2, "0")} · Inspection file</p>
+            <div className="file-title">
+              <div><h2 id="item-title">{selected.title}</h2><p>{selected.location} · {selected.description}</p></div>
+              <p className="file-amount">{money(selected.amount_cents)}<small>USD · fixed by contract</small></p>
+            </div>
+            <ol className="steps" aria-label="Progress">
+              {STEPS.map((s, i) => <li key={s} className={cx(i < stepIndex(selected.state) && "is-done", i === stepIndex(selected.state) && !isTerminal && "is-now")}><span>{i < stepIndex(selected.state) ? <Check size={11} strokeWidth={3} /> : i + 1}</span>{s}</li>)}
+            </ol>
+            <div className={cx("next-step", step.who && step.who !== role && "is-elsewhere")}>
+              <p><span className="ns-label">{step.who ? `Next · ${step.who === "homeowner" ? "Homeowner" : "Contractor"}` : isTerminal ? "Closed" : "Attention"}</span>{step.text}</p>
+              {step.who && step.who !== role && <button type="button" className="btn btn-quiet" onClick={() => setRole(step.who!)}>Switch to {step.who} <ArrowRight size={14} aria-hidden="true" /></button>}
+            </div>
+          </header>
+
+          <section className="file-section">
+            <h3><span className="sec-num">{ROMAN[0]}</span>Agreed acceptance criteria</h3>
+            <ol className="criteria">{selected.acceptance_criteria.split(/;\s*/).filter(Boolean).map((c, i) => <li key={i}>{c.charAt(0).toUpperCase() + c.slice(1).replace(/\.$/, "")}</li>)}</ol>
+          </section>
+
+          <section className="file-section">
+            <h3><span className="sec-num">{ROMAN[1]}</span>Funds hold<small>PayPal Orders v2 · AUTHORIZE</small></h3>
+            {selected.paypal_auth_id ? <p className="hold-line"><ShieldCheck size={16} aria-hidden="true" /><span>{money(selected.amount_cents)} authorized by the homeowner and held by PayPal for this item only. Nothing is charged until the homeowner decides.<code>{selected.paypal_auth_id}</code></span></p>
+              : role === "homeowner" && live && meta?.paypal.configured && meta.paypal.clientId ? <div className="hold-action">
+                <p>Approve a hold of <b>{money(selected.amount_cents)}</b> for this fix. PayPal reserves the funds; nothing is captured now.</p>
+                <PayPalButton clientId={meta.paypal.clientId} itemId={selected.id} passcode={passcode} onSettled={(text, ok) => { setNotice({ text, ok }); void refresh(passcode); }} />
+                {selected.state === "order_created" && <button type="button" className="btn btn-quiet" disabled={!!busy} onClick={() => act("sync", `/api/items/${selected.id}/sync`)}><RefreshCcw size={14} aria-hidden="true" />Already approved? Check PayPal status</button>}
+              </div>
+              : <p className="muted-line">{!live ? "Unlock the demo to approve holds in the PayPal sandbox." : role !== "homeowner" ? "Waiting for the homeowner to approve this hold in PayPal." : "PayPal sandbox credentials are not configured on the server."}</p>}
+          </section>
+
+          <section className="file-section">
+            <h3><span className="sec-num">{ROMAN[2]}</span>Photo evidence<small>Submitted by the contractor</small></h3>
+            <div className="evidence-pair">
+              <EvidencePane stage="before" src={selected.before_url} hasPhoto={!!selected.before_path} canUpload={canUpload} busy={!!busy} onUpload={(f) => upload("before", f)} />
+              <EvidencePane stage="after" src={selected.after_url} hasPhoto={!!selected.after_path} canUpload={canUpload} busy={!!busy} onUpload={(f) => upload("after", f)} />
+            </div>
+            {busy?.startsWith("upload") && <p className="inline-note" role="status">Uploading and checking the image…</p>}
+            {role === "contractor" && <p className="fine">{canUpload ? "JPG, PNG or WebP up to 6 MB. Photos are stored privately and shown through short-lived links. Replacing a photo clears the previous review." : selected.paypal_auth_id ? "Evidence is locked once the homeowner has decided." : "Photos can be submitted once the homeowner has approved this hold."}</p>}
+          </section>
+
+          <section className="file-section">
+            <h3><span className="sec-num">{ROMAN[3]}</span>Advisory evidence review<small>Claude · describes, never decides</small></h3>
+            {selected.ai_review ? <AdvisoryReport report={selected.ai_review} />
+              : <p className="muted-line">{selected.before_path && selected.after_path ? "Photos are in. The contractor can request the advisory review." : "Claude compares the before and after photos against each criterion once both are submitted, and says plainly what it cannot see."}</p>}
+            {role === "contractor" && live && (selected.state === "submitted" || selected.state === "reviewed") && <>
+              <button type="button" className="btn btn-outline" disabled={!!busy || !meta?.ai.configured} onClick={() => act("review", `/api/items/${selected.id}/review`)}>
+                <Sparkles size={15} aria-hidden="true" />{busy === "review" ? "Reviewing photos…" : selected.ai_review ? "Run the review again" : "Request advisory review"}
+              </button>
+              {!meta?.ai.configured && <p className="fine">ANTHROPIC_API_KEY is not set on the server; no sample report is substituted.</p>}
+            </>}
+          </section>
+
+          <section className="file-section decision">
+            <h3><span className="sec-num">{ROMAN[4]}</span>Homeowner decision</h3>
+            {selected.state === "captured" ? <div className="outcome outcome-paid" role="status">
+              <span className="seal" aria-hidden="true"><Check size={22} strokeWidth={2.5} /></span>
+              <div><p className="outcome-title">Accepted. {money(selected.amount_cents)} paid to the contractor.</p><p>PayPal capture <code>{selected.paypal_capture_id}</code> reports <b>{selected.paypal_status}</b>{selected.decision_at && <> · decided {when(selected.decision_at)}</>}</p></div>
+            </div>
+              : selected.state === "voided" ? <div className="outcome outcome-released" role="status">
+                <span className="seal" aria-hidden="true"><X size={20} strokeWidth={2.5} /></span>
+                <div><p className="outcome-title">Rejected. The {money(selected.amount_cents)} hold was released.</p><p>PayPal authorization <code>{selected.paypal_auth_id}</code> reports <b>{selected.paypal_status}</b>. The homeowner was not charged for this item.</p></div>
+              </div>
+              : selected.state === "reviewed" && role === "homeowner" ? (confirming ? <div className="confirm" role="group" aria-label="Confirm decision">
+                <p>{confirming === "accepted" ? <>Capture <b>{money(selected.amount_cents)}</b> from this item’s PayPal hold and pay the contractor?</> : <>Void this item’s <b>{money(selected.amount_cents)}</b> hold? The contractor will not be paid for it.</>}</p>
+                <div className="confirm-actions">
+                  <button type="button" className={confirming === "accepted" ? "btn btn-pine" : "btn btn-clay"} disabled={!!busy || !live} autoFocus onClick={() => act("decide", `/api/items/${selected.id}/decision`, { decision: confirming })}>{busy === "decide" ? "Waiting for PayPal…" : confirming === "accepted" ? "Confirm and pay" : "Confirm and release"}</button>
+                  <button type="button" className="btn btn-quiet" disabled={!!busy} onClick={() => setConfirming(null)}>Cancel</button>
+                </div>
+              </div> : <div className="decide">
+                <button type="button" className="btn btn-pine" disabled={!!busy || !live} onClick={() => setConfirming("accepted")}><Check size={16} aria-hidden="true" />Accept and pay {money(selected.amount_cents)}</button>
+                <button type="button" className="btn btn-outline-clay" disabled={!!busy || !live} onClick={() => setConfirming("rejected")}><X size={15} aria-hidden="true" />Reject and release</button>
+                <p className="fine">Your decision is yours. The review above is advisory and is not consulted when money moves.</p>
+              </div>)
+              : ["capture_pending", "void_pending", "payment_error"].includes(selected.state) ? <div className="reconcile">
+                <p>{selected.state === "payment_error" ? "PayPal’s response was not confirmed, so PunchPay stopped instead of retrying." : "PayPal has not reported a final status yet."}{selected.last_error && <small>{selected.last_error}</small>}</p>
+                <button type="button" className="btn btn-outline" disabled={!!busy || !live} onClick={() => act("sync", `/api/items/${selected.id}/sync`)}><RefreshCcw size={14} aria-hidden="true" />{busy === "sync" ? "Checking PayPal…" : "Reconcile with PayPal"}</button>
+              </div>
+              : <p className="muted-line">{selected.state === "reviewed" ? "Waiting for the homeowner to decide." : "The decision opens once evidence has been submitted and reviewed."}</p>}
+          </section>
+
+          <section className="file-section">
+            <h3><span className="sec-num">{ROMAN[5]}</span>Record<small>Append-only</small></h3>
+            <Timeline events={itemEvents} compact />
+          </section>
+        </article>
+      </div>
+
+      <section className="register" aria-labelledby="ledger-title">
+        <div className="register-head"><h2 id="ledger-title">Payments ledger</h2><p>Every reference below came back from the PayPal sandbox API. Statuses are confirmed by a follow-up GET, never assumed.</p></div>
+        <Ledger items={items} />
+        <div className="register-head"><h2>Project record</h2><p>All events across both items, newest first.</p></div>
+        <Timeline events={audit} items={items} />
+      </section>
     </main>
-    <div className="access-panel"><div className="access-copy"><LockKeyhole size={16}/><span>{live ? "Backend connected" : "Design preview"} · {passcode ? "Demo passcode saved this session" : "Enter demo passcode to act"}</span></div><div className="access-form"><input type="password" autoComplete="off" placeholder="Demo passcode" value={editPasscode} onChange={e => setEditPasscode(e.target.value)} onKeyDown={e => { if(e.key === "Enter") { setPasscode(editPasscode); sessionStorage.setItem("punchpay_demo_passcode",editPasscode); }}}/><button onClick={() => { setPasscode(editPasscode); sessionStorage.setItem("punchpay_demo_passcode",editPasscode); }}>Unlock</button><button className="refresh-button" aria-label="Refresh backend status" title="Refresh" onClick={() => void refresh()}><RefreshCcw size={15}/></button></div></div>
-    {notice && <div className="toast" role="status"><CircleAlert size={16}/>{notice}<button onClick={() => setNotice("")} aria-label="Dismiss"><X size={16}/></button></div>}
+
+    <footer className="colophon">
+      <p>PunchPay · Built for the PayPal AI Hackathon 2026 · PayPal sandbox only, no real money · Not escrow, inspection or certification.</p>
+      {live && <button type="button" className="text-button" onClick={lock}><LockKeyhole size={13} aria-hidden="true" />Lock demo</button>}
+    </footer>
+
+    {notice && <div className={cx("toast", !notice.ok && "is-error")} role={notice.ok ? "status" : "alert"}>
+      <span>{notice.text}</span><button type="button" aria-label="Dismiss" onClick={() => setNotice(null)}><X size={15} /></button>
+    </div>}
   </div>;
 }

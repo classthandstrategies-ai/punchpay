@@ -8,6 +8,7 @@ export type AIReport = {
   criteria: { criterion: string; result: CriterionResult; evidence: string }[];
   observations: string[];
   uncertainty: string[];
+  views_comparable?: "yes" | "partly" | "no";
   model: string;
   reviewed_at: string;
   source: "live_model" | "sample_fixture";

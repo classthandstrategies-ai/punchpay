@@ -1,44 +1,87 @@
 import "server-only";
+import Anthropic from "@anthropic-ai/sdk";
+import { z } from "zod";
+import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import type { AIReport, PunchItem } from "./types";
-import { db } from "./server";
+import { db, EVIDENCE_BUCKET, HttpError } from "./server";
 
-async function imageBlock(path: string) {
-  const { data, error } = await db().storage.from("punchpay-evidence").download(path);
-  if (error || !data) throw new Error("Could not read evidence image");
+const DEFAULT_MODEL = "claude-opus-5-5";
+
+const ReportSchema = z.object({
+  views_comparable: z.enum(["yes", "partly", "no"]).describe("Do the before and after photos show the same surface from a comparable angle and distance?"),
+  assessment: z.enum(["appears_satisfied", "insufficient_evidence", "visible_concern"]),
+  summary: z.string().describe("Two or three plain sentences for a homeowner. Describe only what is visible."),
+  criteria: z.array(z.object({
+    criterion: z.string(),
+    result: z.enum(["supported", "uncertain", "not_supported"]),
+    evidence: z.string().describe("What in the photos supports this result, referring to BEFORE or AFTER explicitly.")
+  })),
+  observations: z.array(z.string()),
+  uncertainty: z.array(z.string()).describe("Limits of what these photos can show. Never empty.")
+});
+
+const SYSTEM = `You review photographed evidence of small home-renovation punch-list fixes for a homeowner.
+You are advisory only: the homeowner decides whether to pay, and you never recommend paying or withholding payment.
+
+Rules:
+- Describe only what is actually visible in the two photos. Do not infer hidden workmanship, materials, durability, code compliance, safety, or anything behind or outside the frame.
+- Judge each acceptance criterion separately. "supported" needs clear visible evidence in the AFTER photo; use "uncertain" whenever lighting, resolution, framing, glare, or angle prevents a confident reading; use "not_supported" only for a visible problem or a clearly missing required shot.
+- If the photos do not show the same surface from a comparable view, say so in views_comparable and uncertainty, and do not use "appears_satisfied".
+- "appears_satisfied" only when every criterion is supported. "visible_concern" when any criterion is visibly not met. Otherwise "insufficient_evidence".
+- Always list at least one honest limitation in uncertainty.
+- If the images do not appear to be renovation evidence at all, say so plainly.`;
+
+async function imageBlock(path: string): Promise<Anthropic.ImageBlockParam> {
+  const { data, error } = await db().storage.from(EVIDENCE_BUCKET).download(path);
+  if (error || !data) throw new HttpError(500, "Could not read evidence image");
   const bytes = Buffer.from(await data.arrayBuffer());
-  const mime = path.endsWith("png") ? "image/png" : path.endsWith("webp") ? "image/webp" : "image/jpeg";
-  return { type: "image" as const, source: { type: "base64" as const, media_type: mime, data: bytes.toString("base64") } };
+  const media_type = path.endsWith(".png") ? "image/png" : path.endsWith(".webp") ? "image/webp" : "image/jpeg";
+  return { type: "image", source: { type: "base64", media_type, data: bytes.toString("base64") } };
 }
+
+let client: Anthropic | null = null;
+
 export async function analyze(item: PunchItem): Promise<AIReport> {
-  const key = process.env.ANTHROPIC_API_KEY;
-  const model = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5";
-  if (!key) throw new Error("ANTHROPIC_API_KEY required for live AI review");
-  if (!item.before_path || !item.after_path) throw new Error("Before and after photos both required");
-  const before = await imageBlock(item.before_path);
-  const after = await imageBlock(item.after_path);
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST", cache: "no-store", headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-    body: JSON.stringify({
-      model, max_tokens: 1400, temperature: 0,
-      system: `You review photographed evidence of minor home renovation punch-list work. You MUST avoid certifying hidden workmanship, material quality, code compliance, structural safety, or anything not actually visible. You must say when photos are insufficient or perspectives differ. Produce ONLY one JSON object: {"assessment":"appears_satisfied|insufficient_evidence|visible_concern","summary":"...","criteria":[{"criterion":"...","result":"supported|uncertain|not_supported","evidence":"..."}],"observations":["..."],"uncertainty":["..."]}. No markdown. Never make the payment decision.`,
+  if (!process.env.ANTHROPIC_API_KEY) throw new HttpError(503, "ANTHROPIC_API_KEY is required for live AI review. No sample report is substituted.");
+  if (!item.before_path || !item.after_path) throw new HttpError(409, "Both a before and an after photo are required");
+  const model = process.env.ANTHROPIC_MODEL || DEFAULT_MODEL;
+  client ??= new Anthropic();
+  const [before, after] = await Promise.all([imageBlock(item.before_path), imageBlock(item.after_path)]);
+  const criteria = item.acceptance_criteria.split(/;\s*/).map((c) => c.trim().replace(/\.$/, "")).filter(Boolean);
+
+  let response;
+  try {
+    response = await client.beta.messages.parse({
+      model, max_tokens: 16000,
+      betas: ["server-side-fallback-2026-07-01"],
+      fallbacks: "default",
+      output_config: { effort: "medium", format: zodOutputFormat(ReportSchema) },
+      system: SYSTEM,
       messages: [{ role: "user", content: [
-        { type: "text", text: `Task: ${item.title}. Location: ${item.location}. Acceptance criteria: ${item.acceptance_criteria}. Review the BEFORE image first and AFTER image second. Only describe visibly supported changes, no financial advice.` },
-        { type: "text", text: "BEFORE" }, before,
-        { type: "text", text: "AFTER" }, after
+        { type: "text", text: `Fix: ${item.title}\nLocation: ${item.location}\nScope: ${item.description}\nAcceptance criteria (assess each one, keep this wording):\n${criteria.map((c, i) => `${i + 1}. ${c}`).join("\n")}` },
+        { type: "text", text: "BEFORE photo:" }, before,
+        { type: "text", text: "AFTER photo:" }, after
       ] }]
-    })
-  });
-  const raw = await response.json();
-  if (!response.ok) throw new Error(`AI provider rejected request (${response.status})`);
-  const text = (raw.content || []).filter((v: { type: string }) => v.type === "text").map((v: { text: string }) => v.text).join("\n");
-  let payload: Partial<AIReport>;
-  try { payload = JSON.parse(text.replace(/^```json\s*|\s*```$/g, "")); }
-  catch { throw new Error("AI report returned invalid JSON; please retry") }
-  if (!["appears_satisfied", "insufficient_evidence", "visible_concern"].includes(payload.assessment || "") || !Array.isArray(payload.criteria) || typeof payload.summary !== "string") throw new Error("AI report failed validation");
+    });
+  } catch (error) {
+    if (error instanceof Anthropic.RateLimitError) throw new HttpError(429, "AI provider is rate limiting; try again shortly");
+    if (error instanceof Anthropic.AuthenticationError) throw new HttpError(503, "ANTHROPIC_API_KEY was rejected");
+    if (error instanceof Anthropic.APIError) throw new HttpError(502, `AI provider error (${error.status ?? "network"})`);
+    throw error;
+  }
+  if (response.stop_reason === "refusal") throw new HttpError(422, "The AI model declined to review these images");
+  const out = response.parsed_output;
+  if (!out) throw new HttpError(502, "AI report could not be parsed; please retry");
+
+  // Server-side guardrails on top of the prompt: the label can never overstate the evidence.
+  let assessment = out.assessment;
+  const results = out.criteria.map((c) => c.result);
+  if (results.includes("not_supported")) assessment = "visible_concern";
+  else if (assessment === "appears_satisfied" && (out.views_comparable === "no" || results.length === 0 || results.some((r) => r !== "supported"))) assessment = "insufficient_evidence";
+  const uncertainty = out.uncertainty.length ? out.uncertainty : ["Photos show surface appearance only; hidden workmanship cannot be assessed."];
+
   return {
-    assessment: payload.assessment!, summary: payload.summary!, criteria: payload.criteria,
-    observations: Array.isArray(payload.observations) ? payload.observations : [],
-    uncertainty: Array.isArray(payload.uncertainty) ? payload.uncertainty : [],
-    model, reviewed_at: new Date().toISOString(), source: "live_model"
+    assessment, summary: out.summary, criteria: out.criteria, observations: out.observations, uncertainty,
+    views_comparable: out.views_comparable, model: response.model, reviewed_at: new Date().toISOString(), source: "live_model"
   };
 }
