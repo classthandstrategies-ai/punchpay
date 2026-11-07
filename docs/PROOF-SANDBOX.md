@@ -19,7 +19,7 @@ From the official Orders v2 / Payments v2 OpenAPI schemas (read Nov 8, 2026):
 - `purchase_units[].payee` (`merchant_id`, `email_address`) is an accepted Create Order request field and is returned in the order representation when `Prefer: return=representation` is sent.
 - `GET /v2/payments/authorizations/{id}` includes a read-only `payee` object.
 
-So the contractor is named explicitly at order creation and then re-verified on the order, on the authorization, and again immediately before capture or void. A missing payee is treated as a failure and never skipped.
+So the contractor is named explicitly at order creation and then re-verified on the order, on the authorization, and again immediately before capture or void. If an authorization response omits `payee`, the client GETs its parent order (from `supplementary_data.related_ids.order_id`, which must match the stored order) and verifies the payee there; the path used is recorded as `payeeVerifiedVia`. If neither source names the contractor, the operation fails. The payee check is never skipped.
 
 ## Observed results
 _To be completed from real `sandbox:verify` output. Client secrets and buyer personal data are omitted._

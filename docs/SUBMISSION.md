@@ -24,16 +24,24 @@ PunchPay turns each leftover fix into its own small, independent payment decisio
   - The audit log is append-only.
   - Browsers have no direct table or storage access.
 
+- **Offline simulation (`/simulation`).** It runs the same decision and reconcile code against an in-tab store and a simulated PayPal. That covers six labeled scenarios: accepted paint, rejected tile, missing evidence, inconclusive review, capture failure, and a duplicate accept. It never touches the network.
+- **Tests.**
+  - 42 Node tests for flows, payment core, image checks and scenarios.
+  - SQL guard tests on PostgreSQL 16.
+  - 22 Playwright runs with axe accessibility scans on desktop and mobile.
+
 ## Challenges
 - **Lost responses.** If a capture times out, did PayPal capture? PunchPay parks the item as "needs reconciliation" and resolves it only by GET. It never retries money movement blindly.
 - **Verifying who gets paid.** The contractor merchant ID is checked on the order, on the authorization, and again right before capture or void.
+- **Stale and racing decisions.** Before claiming an item, the hold is checked by GET. An expired or denied hold ends cleanly as "hold ended". A decision is final once recorded, so a second tab can only replay the same decision with the same request ID, never flip it.
+- **Untrusted uploads.** Every photo is fully decoded and re-encoded server-side. That checks the real format, caps the pixel count and strips EXIF/GPS.
 - **Keeping the AI honest.** It has to report mismatched angles and blurry shots rather than guess.
 
 ## What's next
-Real accounts with server-enforced homeowner and contractor roles (the demo uses a shared sandbox passcode), PayPal webhooks with signature verification, and partial captures for partly completed work.
+Real accounts in place of the sandbox passcodes (today each passcode maps to a server-enforced homeowner or contractor role), PayPal webhooks with signature verification, and partial captures for partly completed work.
 
 ## Technical proof
 _(fill from docs/PROOF-SANDBOX.md: paint capture ID + COMPLETED, tile authorization ID + VOIDED, payee merchant verified)_
 
 ## Honest limits
-Sandbox only. Not escrow. AI output is advisory and is not an inspection or certification. The demo passcode is not real authentication.
+Sandbox only. Not escrow. AI output is advisory and is not an inspection or certification. Passcodes are not real authentication. The offline simulation is labeled as such and is not evidence of PayPal behavior.

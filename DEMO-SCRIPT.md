@@ -3,7 +3,8 @@
 Every shot must be real app footage against the PayPal sandbox and the live Claude API. No mock screens, no pre-written AI text. Film after `docs/PROOF-SANDBOX.md` is complete.
 
 **Prep before recording**
-- Run the demo reset (`select public.punchpay_reset_demo();` as service role). This archives the previous run.
+- Run the demo reset (`select public.punchpay_reset_demo();` as service role). This archives the previous run. It refuses while a capture or void is unconfirmed (reconcile first). It also refuses while PayPal holds are still open; void or let them end, or knowingly pass `punchpay_reset_demo(true)` to leave them open in the sandbox.
+- Log in with `DEMO_PASSCODE` (the presenter, both roles) so the role switch works on one screen.
 - Have the four photos ready: paint before/after, tile before/after.
 - Browser at 1440×900, 100% zoom.
 - A second window logged in to the sandbox Personal buyer.
@@ -18,6 +19,11 @@ Every shot must be real app footage against the PayPal sandbox and the live Clau
 | 1:28–1:58 | Two human decisions | Switch to homeowner. Paint: "Accept and pay $30.00", inline confirm, green outcome with capture ID and COMPLETED. Tile: "Reject and release", confirm, stone outcome with VOIDED. | "The homeowner decides. Accept captures thirty dollars from that hold only. Reject voids the other hold, and the homeowner isn't charged." |
 | 1:58–2:16 | Proof | Tally: $30 paid, $20 released. Scroll to the Payments ledger (order, auth, capture IDs, payee) and the Project record. Refresh the page: everything persists. | "Every status here came back from PayPal and was checked with a follow-up GET. Refresh, and it's all still there. No double charges on retry." |
 | 2:16–2:30 | Close | Optional 3-second split with the `npm run sandbox:verify` output. End on the wordmark. | "PayPal Orders and Payments v2, Claude vision, and a decision that stays human. PunchPay." |
+
+**If the sandbox or the AI is down on recording day**
+Record the `/simulation` page instead, and say so on screen and in the narration: "This is the offline simulation; nothing here touched PayPal." It is labeled "Simulation" throughout, and its references start with `SIM-`. Never cut simulation footage into the real segment, and never put it in the Devpost technical proof.
+
+**Narration note:** the Claude report narrates against the seeded criteria. Paint: scuff no longer visibly apparent, uniform finish, same wall area. Tile: uncracked, flush and aligned, continuous grout. Quote what the live report actually says, not this list.
 
 **Do not**
 - Say "escrow", "guaranteed", "certified" or "inspected".
