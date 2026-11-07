@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test:payments": "node --test tests/*.test.mjs",
+    "test": "node --test --no-warnings tests/*.test.mjs",
+    "test:payments": "node --test --no-warnings tests/*.test.mjs",
     "sandbox:create": "node --env-file=.env.local scripts/paypal-smoke.mjs create",
     "sandbox:settle": "node --env-file=.env.local scripts/paypal-smoke.mjs settle",
     "sandbox:verify": "node --env-file=.env.local scripts/paypal-smoke.mjs verify",
@@ -21,6 +22,7 @@
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "server-only": "^0.0.1",
+    "sharp": "^0.35.5",
     "zod": "^4.6.7"
   },
   "devDependencies": {

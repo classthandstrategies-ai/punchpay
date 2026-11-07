@@ -1,8 +1,9 @@
 export const BASE: string;
+export const REQUEST_TIMEOUT_MS: number;
 export type Money = { currency_code: string; value: string };
 export type PayPalLink = { href: string; rel: string; method?: string };
 export type PayPalAuthorization = { id: string; status: string; amount?: Money; expiration_time?: string; payee?: { merchant_id?: string; email_address?: string }; supplementary_data?: { related_ids?: { order_id?: string } }; payeeVerifiedVia?: "authorization" | "parent_order" };
-export type PayPalCapture = { id: string; status: string; amount?: Money };
+export type PayPalCapture = { id: string; status: string; amount?: Money; supplementary_data?: { related_ids?: { authorization_id?: string; order_id?: string } } };
 export type PayPalOrder = {
   id: string;
   status: string;
@@ -21,9 +22,10 @@ export function assertOrderMatches(order: PayPalOrder, expect: { referenceId?: s
 export function getAuth(order: PayPalOrder): PayPalAuthorization;
 export function getCaptureFromOrder(order: PayPalOrder): PayPalCapture | null;
 export function approvalUrl(order: PayPalOrder): string | null;
+export class VerificationError extends Error {}
 export class PayPalError extends Error { status?: number; issue?: string; debugId?: string }
 export class PayPalSandbox {
-  constructor(opts: { clientId?: string; secret?: string; merchantId?: string; fetchImpl?: typeof fetch });
+  constructor(opts: { clientId?: string; secret?: string; merchantId?: string; fetchImpl?: typeof fetch; timeoutMs?: number });
   merchantId: string;
   request<T = unknown>(path: string, opts?: { method?: "GET" | "POST"; body?: object; requestId?: string }): Promise<T>;
   getOrder(orderId: string): Promise<PayPalOrder>;

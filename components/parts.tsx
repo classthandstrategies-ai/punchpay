@@ -17,7 +17,8 @@ export const STATE_LABEL: Record<PunchItem["state"], { text: string; tone: "open
   captured: { text: "Accepted · Paid", tone: "paid" },
   void_pending: { text: "Release in progress", tone: "wait" },
   voided: { text: "Rejected · Released", tone: "released" },
-  payment_error: { text: "Needs reconciliation", tone: "alert" }
+  payment_error: { text: "Needs reconciliation", tone: "alert" },
+  hold_ended: { text: "Hold ended · not paid", tone: "released" }
 };
 
 export function StatusTag({ state }: { state: PunchItem["state"] }) {
@@ -41,7 +42,13 @@ const EVENT_LABEL: Record<string, string> = {
   payment_outcome_unconfirmed: "Payment response not confirmed · parked for reconciliation",
   reconciled_capture: "Reconciled with PayPal · capture",
   reconciled_void: "Reconciled with PayPal · void",
-  reconciled_no_movement: "Reconciled · PayPal confirms no money moved"
+  reconciled_no_movement: "Reconciled · PayPal confirms no money moved",
+  decision_accepted_retried: "Homeowner retried the acceptance (same PayPal request)",
+  decision_rejected_retried: "Homeowner retried the rejection (same PayPal request)",
+  decision_not_processed: "PayPal declined the request · no money moved",
+  capture_failed: "PayPal declined the capture · not paid",
+  hold_ended: "PayPal reports the hold ended · not paid",
+  reconcile_conflict: "Reconcile found a conflict · escalated, not recorded"
 };
 const ACTOR: Record<string, string> = { homeowner: "Homeowner", contractor: "Contractor", ai: "Claude (advisory)", paypal: "PayPal sandbox", system: "PunchPay" };
 

@@ -23,7 +23,7 @@ do $$ begin
   assert not has_table_privilege('anon', 'public.punch_items', 'select'), 'anon cannot read items';
   assert not has_table_privilege('authenticated', 'public.punch_items', 'update'), 'authenticated cannot update items';
   assert not has_table_privilege('anon', 'public.audit_events', 'insert'), 'anon cannot write audit';
-  assert not has_function_privilege('anon', 'public.punchpay_reset_demo()', 'execute'), 'anon cannot reset';
+  assert not has_function_privilege('anon', 'public.punchpay_reset_demo(boolean)', 'execute'), 'anon cannot reset';
   assert (select bool_and(relrowsecurity) from pg_class where relname in ('projects','punch_items','audit_events','demo_runs') and relnamespace = 'public'::regnamespace), 'RLS on';
 end $$;
 
@@ -59,10 +59,15 @@ select pg_temp.expect_error(format($q$update public.punch_items set state='void_
 update public.punch_items set state='void_pending', homeowner_decision='rejected', decision_at=now() where id=:tile;
 select pg_temp.expect_error(format($q$update public.punch_items set state='captured', paypal_capture_id='CAP-T' where id=%L$q$, :tile), 'illegal|captured_has_id');
 select pg_temp.expect_error(format($q$update public.punch_items set paypal_capture_id='CAP-T' where id=%L$q$, :tile), 'capture_is_final');
--- unconfirmed response -> payment_error -> reconcile finds no movement -> reviewed (decision cleared)
+-- unconfirmed response -> payment_error -> reconcile finds no movement -> reviewed, decision KEPT
 update public.punch_items set state='payment_error', last_error='timeout' where id=:tile;
-update public.punch_items set state='reviewed', homeowner_decision=null, decision_at=null where id=:tile;
-update public.punch_items set state='void_pending', homeowner_decision='rejected', decision_at=now() where id=:tile;
+update public.punch_items set state='reviewed' where id=:tile;
+-- the decision cannot be cleared or flipped after a failed attempt (no capture after a rejection)
+select pg_temp.expect_error(format($q$update public.punch_items set homeowner_decision=null where id=%L$q$, :tile), 'final');
+select pg_temp.expect_error(format($q$update public.punch_items set state='capture_pending', homeowner_decision='accepted' where id=%L$q$, :tile), 'final');
+-- and the evidence behind a recorded decision cannot be swapped
+select pg_temp.expect_error(format($q$update public.punch_items set state='submitted', after_path='t/new.jpg', ai_review=null where id=%L$q$, :tile), 'evidence is locked');
+update public.punch_items set state='void_pending', decision_at=now() where id=:tile;
 update public.punch_items set state='voided', paypal_status='VOIDED' where id=:tile;
 
 -- a PayPal ID can never be shared across items
@@ -74,11 +79,43 @@ select pg_temp.expect_error($q$update public.audit_events set action='forged'$q$
 select pg_temp.expect_error($q$delete from public.audit_events$q$, 'append-only');
 select pg_temp.expect_error(format($q$insert into public.audit_events (item_id, actor, action) values (%L, 'bank', 'x')$q$, :paint), 'check constraint');
 
--- demo reset archives evidence before resetting
+-- audit cannot be truncated, demo archive is append-only
+select pg_temp.expect_error($q$truncate public.audit_events$q$, 'append-only');
+select pg_temp.expect_error($q$truncate public.punch_items cascade$q$, 'append-only');
+
+-- every item has its own random request nonce (order PayPal-Request-Ids differ across databases)
+do $$ begin
+  assert (select count(distinct request_nonce) from public.punch_items) = 2, 'distinct request nonces';
+end $$;
+select pg_temp.expect_error(format($q$update public.punch_items set request_nonce=gen_random_uuid() where id=%L$q$, :paint), 'immutable');
+
+-- the app's own role (service_role) cannot bypass the guards with the reset flag, or truncate
+do $$
+declare msg text := '';
+begin
+  set local role service_role;
+  perform set_config('punchpay.demo_reset', 'on', true);
+  begin
+    update public.punch_items set state = 'awaiting_authorization', paypal_capture_id = null where slug = 'paint';
+  exception when others then msg := sqlerrm; end;
+  assert msg ~* 'immutable|illegal', format('service_role bypassed guard via GUC (%s)', msg);
+  msg := '';
+  begin delete from public.audit_events; exception when others then msg := sqlerrm; end;
+  assert msg ~* 'append-only', format('service_role deleted audit via GUC (%s)', msg);
+  msg := '';
+  begin truncate public.audit_events; exception when others then msg := sqlerrm; end;
+  assert msg ~* 'permission denied|append-only', format('service_role truncated audit (%s)', msg);
+  perform set_config('punchpay.demo_reset', 'off', true);
+  reset role;
+end $$;
+
+-- demo reset archives evidence before resetting (callable by the service role)
 do $$
 declare run uuid;
 begin
+  set local role service_role;
   run := public.punchpay_reset_demo();
+  reset role;
   assert (select jsonb_array_length(items) from public.demo_runs where id = run) = 2, 'items archived';
   assert (select jsonb_array_length(audit) from public.demo_runs where id = run) = 1, 'audit archived';
   assert (select count(*) from public.audit_events) = 0, 'audit cleared';
@@ -86,5 +123,26 @@ begin
   assert current_setting('punchpay.demo_reset', true) is distinct from 'on', 'bypass flag not left on';
 end $$;
 select pg_temp.expect_error(format($q$update public.punch_items set state='captured' where id=%L$q$, :paint), 'illegal|captured_has_id');
+select pg_temp.expect_error($q$delete from public.demo_runs$q$, 'append-only');
+select pg_temp.expect_error($q$update public.demo_runs set items='[]'$q$, 'append-only');
+
+-- reset safety: refuses an open order/hold unless explicitly allowed, and always refuses an in-flight capture
+update public.punch_items set state='order_created', paypal_order_id='ORDER-P2' where id=:paint;
+select pg_temp.expect_error($q$select public.punchpay_reset_demo()$q$, 'open PayPal order or hold');
+update public.punch_items set state='authorized', paypal_auth_id='AUTH-P2' where id=:paint;
+update public.punch_items set state='submitted', before_path='p/b2.jpg', after_path='p/a2.jpg' where id=:paint;
+update public.punch_items set state='reviewed', ai_review='{"assessment":"insufficient_evidence"}' where id=:paint;
+update public.punch_items set state='capture_pending', homeowner_decision='accepted', decision_at=now() where id=:paint;
+select pg_temp.expect_error($q$select public.punchpay_reset_demo(true)$q$, 'unconfirmed capture or void');
+
+-- hold_ended: PayPal reports the hold lapsed; terminal, needs a reported status, never reopens
+select pg_temp.expect_error(format($q$update public.punch_items set state='hold_ended' where id=%L$q$, :paint), 'hold_ended_reported');
+update public.punch_items set state='hold_ended', paypal_status='EXPIRED' where id=:paint;
+select pg_temp.expect_error(format($q$update public.punch_items set state='reviewed' where id=%L$q$, :paint), 'illegal');
+select pg_temp.expect_error(format($q$update public.punch_items set state='captured', paypal_capture_id='CAP-X' where id=%L$q$, :paint), 'illegal');
+do $$ begin
+  perform public.punchpay_reset_demo();
+  assert (select bool_and(state = 'awaiting_authorization' and order_attempt = 3) from public.punch_items where slug = 'paint'), 'reset after hold_ended';
+end $$;
 
 \echo 'DB GUARD TESTS PASSED'

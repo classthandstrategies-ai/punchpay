@@ -1,6 +1,7 @@
 export type ItemState =
   | "awaiting_authorization" | "order_created" | "authorized" | "submitted"
-  | "reviewed" | "capture_pending" | "captured" | "void_pending" | "voided" | "payment_error";
+  | "reviewed" | "capture_pending" | "captured" | "void_pending" | "voided" | "payment_error" | "hold_ended";
+export type Role = "homeowner" | "contractor";
 export type CriterionResult = "supported" | "uncertain" | "not_supported";
 export type AIReport = {
   assessment: "appears_satisfied" | "insufficient_evidence" | "visible_concern";
@@ -37,6 +38,9 @@ export type PunchItem = {
   homeowner_decision: "accepted" | "rejected" | null;
   decision_at: string | null;
   order_attempt: number;
+  /** Per-database random component of the order PayPal-Request-Id. Never sent to the browser. */
+  request_nonce?: string;
+  paypal_auth_expires_at?: string | null;
   last_error: string | null;
   updated_at?: string;
 };

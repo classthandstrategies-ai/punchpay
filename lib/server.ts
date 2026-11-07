@@ -1,14 +1,13 @@
 import "server-only";
-import { timingSafeEqual } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import type { PunchItem, AuditEvent, ItemState } from "./types";
+import type { PunchItem, AuditEvent, ItemState, Role } from "./types";
+import { HttpError } from "./errors";
+import { grantedRoles } from "./access";
+import type { Store } from "./flows";
 
+export { HttpError };
 export const EVIDENCE_BUCKET = "punchpay-evidence";
 let client: SupabaseClient | null = null;
-
-export class HttpError extends Error {
-  constructor(public status: number, message: string) { super(message); }
-}
 
 export function db() {
   const url = process.env.SUPABASE_URL;
@@ -21,13 +20,12 @@ export function backendConfigured() {
   return !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
 }
 
-/** Hackathon sandbox gate only. NOT identity or role authorization. */
-export function requireDemoAccess(request: Request) {
-  const configured = process.env.DEMO_PASSCODE || "";
-  const supplied = request.headers.get("x-demo-passcode") || "";
-  const a = Buffer.from(configured), b = Buffer.from(supplied);
-  if (configured.length < 8 || a.length !== b.length || !timingSafeEqual(a, b))
-    throw new HttpError(401, "Demo passcode required");
+/** Requires a valid passcode; with `role`, also requires that the passcode grants that role. */
+export function requireAccess(request: Request, role?: Role): Role[] {
+  const roles = grantedRoles(request.headers.get("x-demo-passcode") || "");
+  if (!roles.length) throw new HttpError(401, "Demo passcode required");
+  if (role && !roles.includes(role)) throw new HttpError(403, `Only the ${role} can do this. Unlock with the ${role} passcode.`);
+  return roles;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -60,11 +58,6 @@ export async function claimItemState(id: string, prior: ItemState | ItemState[],
   return data as PunchItem;
 }
 
-/** Patch fields without changing state, guarded by the expected current state. */
-export async function patchInState(id: string, current: ItemState, patch: Partial<PunchItem>) {
-  return claimItemState(id, current, current, patch);
-}
-
 /**
  * Best-effort audit log. Called AFTER PayPal has confirmed a money movement, so a logging
  * failure must never throw (a throw could cause a client retry or mark a paid item as failed).
@@ -78,6 +71,8 @@ export async function recordEvent(itemId: string, actor: AuditEvent["actor"], ac
   }
 }
 
+export const supabaseStore: Store = { get: itemById, claim: claimItemState, record: recordEvent };
+
 export async function signedImage(path: string | null) {
   if (!path) return null;
   const { data, error } = await db().storage.from(EVIDENCE_BUCKET).createSignedUrl(path, 900);
@@ -85,14 +80,18 @@ export async function signedImage(path: string | null) {
   return data.signedUrl;
 }
 
+/** Only PunchPay's own messages reach the browser; everything else is logged and replaced with generic text. */
 export function responseError(error: unknown) {
   if (error instanceof HttpError) return Response.json({ error: error.message }, { status: error.status });
   if (error instanceof Error && error.name === "PayPalError") {
     console.error("[punchpay]", error.message);
     return Response.json({ error: error.message }, { status: 502 });
   }
-  // Remaining Errors are PunchPay's own verification messages (payee/amount/status checks): safe to show.
-  if (error instanceof Error && !(error instanceof TypeError)) return Response.json({ error: error.message }, { status: 422 });
+  if (error instanceof Error && error.name === "VerificationError") return Response.json({ error: error.message }, { status: 422 });
+  if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
+    console.error("[punchpay] timeout", error.message);
+    return Response.json({ error: "PayPal did not respond in time. Nothing was retried; check status before trying again." }, { status: 504 });
+  }
   console.error("[punchpay] unexpected", error);
   return Response.json({ error: "Unexpected server error" }, { status: 500 });
 }
