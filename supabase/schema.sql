@@ -37,6 +37,17 @@ create table if not exists public.punch_items (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+-- Idempotent upgrades for databases created from an earlier version of this file.
+alter table public.punch_items add column if not exists order_attempt integer not null default 1;
+alter table public.punch_items add column if not exists last_error text;
+-- A captured item must carry a capture ID; a terminal item must carry an authorization.
+do $$ begin
+  alter table public.punch_items add constraint punch_items_captured_has_id check (state <> 'captured' or paypal_capture_id is not null);
+exception when duplicate_object then null; end $$;
+do $$ begin
+  alter table public.punch_items add constraint punch_items_terminal_has_auth check (state not in ('captured','voided') or paypal_auth_id is not null);
+exception when duplicate_object then null; end $$;
+
 create table if not exists public.audit_events (
   id uuid primary key default gen_random_uuid(),
   item_id uuid not null references public.punch_items(id) on delete cascade,

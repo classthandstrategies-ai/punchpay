@@ -9,7 +9,8 @@
     "typecheck": "tsc --noEmit",
     "test:payments": "node --test tests/*.test.mjs",
     "sandbox:create": "node --env-file=.env.local scripts/paypal-smoke.mjs create",
-    "sandbox:settle": "node --env-file=.env.local scripts/paypal-smoke.mjs settle"
+    "sandbox:settle": "node --env-file=.env.local scripts/paypal-smoke.mjs settle",
+    "sandbox:verify": "node --env-file=.env.local scripts/paypal-smoke.mjs verify"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.0",

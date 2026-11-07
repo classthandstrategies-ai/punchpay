@@ -35,5 +35,8 @@ export type PunchItem = {
   ai_review: AIReport | null;
   homeowner_decision: "accepted" | "rejected" | null;
   decision_at: string | null;
+  order_attempt: number;
+  last_error: string | null;
+  updated_at?: string;
 };
 export type AuditEvent = { id: string; item_id: string; action: string; actor: string; created_at: string; payload: Record<string, unknown> };

@@ -5,8 +5,8 @@ import type { PunchItem, AIReport, AuditEvent } from "@/lib/types";
 import PayPalButton from "./PayPalButton";
 
 const preview: PunchItem[] = [
-  { id: "preview-paint", project_id: "preview", slug: "paint", title: "Paint touch-up", location: "Living room · North wall", description: "Repair the scuffed paint beside the window.", acceptance_criteria: "Scuff no longer visibly apparent; finish is reasonably uniform. Include a context shot and close-up.", amount_cents: 3000, currency: "USD", state: "awaiting_authorization", paypal_order_id: null, paypal_auth_id: null, paypal_capture_id: null, paypal_status: null, payee_merchant_id: null, before_path: null, after_path: null, before_url: null, after_url: null, ai_review: null, homeowner_decision: null, decision_at: null },
-  { id: "preview-tile", project_id: "preview", slug: "tile", title: "Tile repair", location: "Kitchen · Backsplash", description: "Replace the cracked tile near the sink.", acceptance_criteria: "Tile appears uncracked and aligned with adjacent tiles; grout line visually continuous. Include repair close-up.", amount_cents: 2000, currency: "USD", state: "awaiting_authorization", paypal_order_id: null, paypal_auth_id: null, paypal_capture_id: null, paypal_status: null, payee_merchant_id: null, before_path: null, after_path: null, before_url: null, after_url: null, ai_review: null, homeowner_decision: null, decision_at: null }
+  { id: "preview-paint", project_id: "preview", slug: "paint", title: "Paint touch-up", location: "Living room · North wall", description: "Repair the scuffed paint beside the window.", acceptance_criteria: "Scuff no longer visibly apparent; finish is reasonably uniform. Include a context shot and close-up.", amount_cents: 3000, currency: "USD", state: "awaiting_authorization", paypal_order_id: null, paypal_auth_id: null, paypal_capture_id: null, paypal_status: null, payee_merchant_id: null, before_path: null, after_path: null, before_url: null, after_url: null, ai_review: null, homeowner_decision: null, decision_at: null, order_attempt: 1, last_error: null },
+  { id: "preview-tile", project_id: "preview", slug: "tile", title: "Tile repair", location: "Kitchen · Backsplash", description: "Replace the cracked tile near the sink.", acceptance_criteria: "Tile appears uncracked and aligned with adjacent tiles; grout line visually continuous. Include repair close-up.", amount_cents: 2000, currency: "USD", state: "awaiting_authorization", paypal_order_id: null, paypal_auth_id: null, paypal_capture_id: null, paypal_status: null, payee_merchant_id: null, before_path: null, after_path: null, before_url: null, after_url: null, ai_review: null, homeowner_decision: null, decision_at: null, order_attempt: 1, last_error: null }
 ];
 const status: Record<string, { text: string; className: string }> = {
   awaiting_authorization: { text: "Awaiting approval", className: "neutral" },
@@ -67,7 +67,7 @@ export default function Dashboard() {
       setItems(next);
       setAudit(Array.isArray(json.audit) ? json.audit : []);
       setLive(true);
-      setPayPalConfigured(!!json.configured);
+      setPayPalConfigured(!!json.paypal?.configured);
       setSelectedId((previous) => next.find(i => i.id === previous) ? previous : (next.find(i => i.slug === "paint")?.id || next[0]?.id || ""));
     } catch { setLive(false); setItems(preview); setAudit([]); }
   }, [passcode]);
