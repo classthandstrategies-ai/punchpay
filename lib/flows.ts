@@ -198,7 +198,7 @@ export async function decide({ store, paypal: pp }: Deps, id: string, decision: 
       if (now && (now.state === "captured" || now.state === "voided")) return { state: now.state, paypal_status: now.paypal_status };
     }
     await store.record(id, "system", "payment_outcome_unconfirmed", { attempted: pending, error: message.slice(0, 300) });
-    return { state: "payment_error", paypal_status: null, error: `${message}. Payment outcome not confirmed; use “Reconcile with PayPal” instead of retrying.` };
+    return { state: "payment_error", paypal_status: null, error: `${message}. Payment outcome not confirmed; reconcile with PayPal instead of retrying.` };
   }
 }
 

@@ -12,7 +12,8 @@
     "sandbox:create": "node --env-file=.env.local scripts/paypal-smoke.mjs create",
     "sandbox:settle": "node --env-file=.env.local scripts/paypal-smoke.mjs settle",
     "sandbox:verify": "node --env-file=.env.local scripts/paypal-smoke.mjs verify",
-    "test:db": "bash scripts/test-db.sh"
+    "test:db": "bash scripts/test-db.sh",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.6.0",
@@ -26,6 +27,8 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.11.0",
+    "@playwright/test": "^1.56.1",
     "@tailwindcss/postcss": "^4.1.0",
     "@types/node": "^22.0.0",
     "@types/react": "^19.2.0",

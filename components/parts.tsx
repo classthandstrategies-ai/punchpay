@@ -1,10 +1,16 @@
 "use client";
-import { useRef } from "react";
-import { Check, CircleAlert, Minus, Upload, X } from "lucide-react";
+import { useId, useRef, useState, type ReactNode } from "react";
+import { Check, CircleAlert, Columns2, Minus, SlidersHorizontal, Upload, X } from "lucide-react";
 import type { AIReport, AuditEvent, PunchItem } from "@/lib/types";
 
 export const money = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 export const cx = (...p: (string | false | null | undefined)[]) => p.filter(Boolean).join(" ");
+export function missingEvidence(item: Pick<PunchItem, "before_path" | "after_path">) {
+  if (!item.before_path && !item.after_path) return "Missing evidence: no before or after photo has been submitted.";
+  if (!item.before_path) return "Missing evidence: the before photo has not been submitted.";
+  if (!item.after_path) return "Missing evidence: the after photo has not been submitted.";
+  return null;
+}
 export const when = (iso: string) => new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
 export const STATE_LABEL: Record<PunchItem["state"], { text: string; tone: "open" | "active" | "wait" | "paid" | "released" | "alert" }> = {
@@ -96,6 +102,32 @@ export function EvidencePane({ stage, src, hasPhoto, canUpload, busy, onUpload }
   </figure>;
 }
 
+/** Side-by-side by default; a wipe slider when both images are present, for checking the same spot. */
+export function EvidenceCompare({ before, after, children }: { before?: string | null; after?: string | null; children: ReactNode }) {
+  const [mode, setMode] = useState<"pair" | "slider">("pair");
+  const [split, setSplit] = useState(50);
+  const id = useId();
+  if (!before || !after) return <>{children}</>;
+  return <div className="compare">
+    <div className="compare-toggle" role="group" aria-label="Evidence view">
+      <button type="button" aria-pressed={mode === "pair"} onClick={() => setMode("pair")}><Columns2 size={14} aria-hidden="true" />Side by side</button>
+      <button type="button" aria-pressed={mode === "slider"} onClick={() => setMode("slider")}><SlidersHorizontal size={14} aria-hidden="true" />Compare</button>
+    </div>
+    {mode === "pair" ? children : <figure className="evidence compare-wipe">
+      <div className="evidence-frame">
+        <img src={after} alt="After photo" />
+        <img src={before} alt="Before photo, overlaid up to the slider position" className="wipe-top" style={{ clipPath: `inset(0 ${100 - split}% 0 0)` }} />
+        <span className="wipe-line" style={{ left: `${split}%` }} aria-hidden="true" />
+        <span className="evidence-corner">A</span><span className="evidence-corner is-right">B</span>
+      </div>
+      <figcaption>
+        <label htmlFor={id}><b>Before ⟷ After</b>Drag to reveal the same spot in each photo</label>
+        <input id={id} type="range" min={0} max={100} value={split} onChange={(e) => setSplit(Number(e.target.value))} aria-valuetext={`${split}% before, ${100 - split}% after`} />
+      </figcaption>
+    </figure>}
+  </div>;
+}
+
 const VERDICT: Record<AIReport["assessment"], { text: string; tone: string }> = {
   appears_satisfied: { text: "Visible evidence appears to meet the criteria", tone: "good" },
   insufficient_evidence: { text: "Not enough visible evidence to say", tone: "unsure" },
@@ -106,16 +138,17 @@ export function AdvisoryReport({ report }: { report: AIReport }) {
   const v = VERDICT[report.assessment];
   return <div className={cx("report", `verdict-${v.tone}`)}>
     <p className="report-verdict">{v.text}</p>
+    <p className="report-count">{(["supported", "uncertain", "not_supported"] as const).map((r) => `${report.criteria.filter((c) => c.result === r).length} ${r.replace("_", " ")}`).join(" · ")}{report.views_comparable && report.views_comparable !== "yes" && ` · views ${report.views_comparable === "no" ? "not" : "partly"} comparable`}</p>
     <p className="report-summary">{report.summary}</p>
     <ul className="criteria-results">
       {report.criteria.map((c, i) => <li key={i} className={`r-${c.result}`}>
-        <span className="r-mark" aria-label={c.result.replace("_", " ")}>{c.result === "supported" ? <Check size={13} /> : c.result === "not_supported" ? <X size={13} /> : <Minus size={13} />}</span>
+        <span className="r-mark" role="img" aria-label={c.result.replace("_", " ")}>{c.result === "supported" ? <Check size={13} /> : c.result === "not_supported" ? <X size={13} /> : <Minus size={13} />}</span>
         <div><p className="r-criterion">{c.criterion}</p><p className="r-evidence">{c.evidence}</p></div>
       </li>)}
     </ul>
     {report.observations.length > 0 && <div className="report-notes"><h5>Also visible</h5><ul>{report.observations.map((o, i) => <li key={i}>{o}</li>)}</ul></div>}
     <div className="report-notes is-limits"><h5><CircleAlert size={13} aria-hidden="true" /> What these photos cannot show</h5><ul>{report.uncertainty.map((o, i) => <li key={i}>{o}</li>)}{report.views_comparable && report.views_comparable !== "yes" && <li>Before and after views are {report.views_comparable === "no" ? "not" : "only partly"} comparable.</li>}</ul></div>
-    <p className="report-source">{report.source === "live_model" ? `Live analysis · ${report.model}` : "Sample fixture · not a live model"} · {when(report.reviewed_at)} · Advisory, not a certification or inspection</p>
+    <p className="report-source">{report.source === "live_model" ? `Live analysis · ${report.model}` : "Sample fixture written for synthetic illustrations · not a live model"} · {when(report.reviewed_at)} · Advisory, not a certification or inspection</p>
   </div>;
 }
 
@@ -123,11 +156,11 @@ export function Ledger({ items }: { items: PunchItem[] }) {
   return <div className="ledger-wrap"><table className="ledger">
     <thead><tr><th scope="col">Item</th><th scope="col" className="num">Amount</th><th scope="col">Hold</th><th scope="col">Outcome</th><th scope="col">PayPal reference</th></tr></thead>
     <tbody>{items.map((i) => {
-      const outcome = i.state === "captured" ? "Captured" : i.state === "voided" ? "Voided" : i.state === "payment_error" ? "Unconfirmed" : i.state.endsWith("_pending") ? "In progress" : "Open";
+      const outcome = i.state === "captured" ? "Captured" : i.state === "voided" ? "Voided" : i.state === "hold_ended" ? "Ended" : i.state === "payment_error" ? "Unconfirmed" : i.state.endsWith("_pending") ? "In progress" : "Open";
       return <tr key={i.id}>
         <th scope="row">{i.title}<small>{i.location}</small></th>
         <td className="num" data-label="Amount">{money(i.amount_cents)}</td>
-        <td data-label="Hold">{i.state === "captured" ? "Captured" : i.state === "voided" ? "Released" : i.paypal_auth_id ? "Held" : i.paypal_order_id ? "Awaiting approval" : "Not placed"}</td>
+        <td data-label="Hold">{i.state === "captured" ? "Captured" : i.state === "voided" ? "Released" : i.state === "hold_ended" ? "Ended, not paid" : i.paypal_auth_id ? "Held" : i.paypal_order_id ? "Awaiting approval" : "Not placed"}</td>
         <td data-label="Outcome"><span className={cx("ledger-outcome", `o-${outcome.toLowerCase().replace(" ", "-")}`)}>{outcome}</span>{i.paypal_status && <small>PayPal: {i.paypal_status}</small>}</td>
         <td className="refs" data-label="PayPal reference">
           {i.paypal_order_id && <span>Order <code>{i.paypal_order_id}</code></span>}

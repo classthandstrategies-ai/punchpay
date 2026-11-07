@@ -1,20 +1,15 @@
 "use client";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowRight, Check, LockKeyhole, RefreshCcw, ShieldCheck, Sparkles, X } from "lucide-react";
-import type { AuditEvent, PunchItem } from "@/lib/types";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { ArrowRight, Check, CircleAlert, Hourglass, LockKeyhole, RefreshCcw, ShieldCheck, Sparkles, X } from "lucide-react";
+import type { AuditEvent, PunchItem, Role } from "@/lib/types";
+import { liveBackend, type Action, type ActionResult, type Backend, type Meta } from "@/lib/backend";
+import { DEMO_ITEMS, criteriaOf } from "@/lib/demo-items";
 import PayPalButton from "./PayPalButton";
-import { AdvisoryReport, EvidencePane, Ledger, StatusTag, Timeline, cx, money, when } from "./parts";
+import { AdvisoryReport, EvidenceCompare, EvidencePane, Ledger, StatusTag, Timeline, cx, missingEvidence, money, when } from "./parts";
 
-type Role = "homeowner" | "contractor";
-type Meta = { paypal: { configured: boolean; clientId: string | null }; ai: { configured: boolean } };
-
-const base = { project_id: "preview", currency: "USD" as const, state: "awaiting_authorization" as const, paypal_order_id: null, paypal_auth_id: null, paypal_capture_id: null, paypal_status: null, payee_merchant_id: null, before_path: null, after_path: null, before_url: null, after_url: null, ai_review: null, homeowner_decision: null, decision_at: null, order_attempt: 1, last_error: null };
-const PREVIEW: PunchItem[] = [
-  { ...base, id: "preview-paint", slug: "paint", title: "Paint touch-up", location: "Living room · North wall", description: "Repair the scuffed paint beside the window.", acceptance_criteria: "Scuff no longer visibly apparent; finish is reasonably uniform in submitted after-photo; include a wide context shot and a close-up.", amount_cents: 3000 },
-  { ...base, id: "preview-tile", slug: "tile", title: "Tile repair", location: "Kitchen · Backsplash", description: "Replace the cracked tile near the sink.", acceptance_criteria: "Tile appears uncracked and aligned with adjacent tiles; grout line visually continuous; include before photo and clear close-up of repair.", amount_cents: 2000 }
-];
 const ROMAN = ["I", "II", "III", "IV", "V", "VI"];
 const STEPS = ["Funds held", "Photos", "Review", "Decision"];
+const HELD = ["authorized", "submitted", "reviewed", "capture_pending", "void_pending", "payment_error"];
 
 function stepIndex(state: PunchItem["state"]) {
   if (state === "awaiting_authorization" || state === "order_created") return 0;
@@ -27,128 +22,164 @@ function nextStep(item: PunchItem): { who: Role | null; text: string } {
   switch (item.state) {
     case "awaiting_authorization": case "order_created": return { who: "homeowner", text: `Approve a ${money(item.amount_cents)} hold for this fix in PayPal.` };
     case "authorized": return { who: "contractor", text: item.before_path ? "Upload the after photo." : item.after_path ? "Upload the before photo." : "Upload a before and an after photo." };
-    case "submitted": return { who: "contractor", text: "Run the advisory evidence review." };
-    case "reviewed": return { who: "homeowner", text: "Read the evidence and decide: accept and pay, or reject and release." };
+    case "submitted": return { who: "contractor", text: "Request the advisory evidence review." };
+    case "reviewed": return item.homeowner_decision
+      ? { who: "homeowner", text: `PayPal confirmed nothing moved. Retry the ${item.homeowner_decision === "accepted" ? "acceptance" : "rejection"}; it replays the same PayPal request.` }
+      : { who: "homeowner", text: "Read the evidence and decide: accept and pay, or reject and release." };
     case "capture_pending": case "void_pending": return { who: null, text: "PayPal is processing. Reconcile to confirm the outcome." };
     case "payment_error": return { who: null, text: "The payment response was not confirmed. Reconcile with PayPal; do not retry blindly." };
+    case "hold_ended": return { who: null, text: "Closed without payment. PayPal ended the hold before any money moved." };
     default: return { who: null, text: "Closed. The outcome below is the status PayPal reported." };
   }
 }
 const ss = { get: (k: string) => { try { return sessionStorage.getItem(k) || ""; } catch { return ""; } }, set: (k: string, v: string) => { try { sessionStorage.setItem(k, v); } catch { /* storage unavailable */ } } };
+const roleName = (r: Role) => (r === "homeowner" ? "Homeowner" : "Contractor");
 
-export default function Dashboard() {
-  const [items, setItems] = useState<PunchItem[]>(PREVIEW);
+type Props = {
+  /** Supplied by /simulation. Without it the Dashboard uses the live, passcode-protected API. */
+  backend?: Backend;
+  /** Rendered under the masthead (the simulation's scenario band). */
+  banner?: ReactNode;
+  initial?: { slug?: string; role?: Role };
+  /** Called after every action and refresh; the simulation uses it to redraw its PayPal-side ledger. */
+  onChange?: () => void;
+};
+
+export default function Dashboard({ backend: injected, banner, initial, onChange }: Props) {
+  const simulation = injected?.kind === "simulation";
+  const [items, setItems] = useState<PunchItem[]>(DEMO_ITEMS);
   const [audit, setAudit] = useState<AuditEvent[]>([]);
   const [meta, setMeta] = useState<Meta | null>(null);
-  const [selectedId, setSelectedId] = useState(PREVIEW[0].id);
-  const [role, setRoleState] = useState<Role>("homeowner");
+  const [selectedId, setSelectedId] = useState(() => DEMO_ITEMS.find((i) => i.slug === initial?.slug)?.id ?? DEMO_ITEMS[0].id);
+  const [role, setRoleState] = useState<Role>(initial?.role ?? "homeowner");
   const [passcode, setPasscode] = useState("");
   const [draft, setDraft] = useState("");
-  const [connection, setConnection] = useState<{ live: boolean; reason: string }>({ live: false, reason: "Connecting…" });
+  const [connection, setConnection] = useState<{ status: "loading" | "live" | "preview"; reason: string }>({ status: "loading", reason: "Connecting…" });
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ text: string; ok: boolean } | null>(null);
   const [confirming, setConfirming] = useState<"accepted" | "rejected" | null>(null);
+  const outcomeRef = useRef<HTMLDivElement>(null);
+  const focusOutcome = useRef(false);
 
-  const refresh = useCallback(async (code: string) => {
-    if (!code) { setConnection({ live: false, reason: "Enter the demo passcode to load the live sandbox project." }); return; }
+  const backend = useMemo(() => injected ?? liveBackend(passcode), [injected, passcode]);
+  const live = connection.status === "live";
+
+  const refresh = useCallback(async (b: Backend) => {
     try {
-      const res = await fetch("/api/items", { cache: "no-store", headers: { "x-demo-passcode": code } });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json.error || `Backend unavailable (${res.status})`);
-      const next = json.items as PunchItem[];
-      setItems(next); setAudit(json.audit || []); setMeta({ paypal: json.paypal, ai: json.ai });
-      setConnection({ live: true, reason: "" });
-      setSelectedId((prev) => next.some((i) => i.id === prev) ? prev : next[0]?.id || "");
+      const snap = await b.load();
+      setItems(snap.items); setAudit(snap.audit); setMeta(snap.meta);
+      setConnection({ status: "live", reason: "" });
+      setSelectedId((prev) => snap.items.some((i) => i.id === prev) ? prev : snap.items[0]?.id || "");
+      if (snap.meta.roles.length === 1) setRoleState(snap.meta.roles[0]);
     } catch (e) {
-      setConnection({ live: false, reason: e instanceof Error ? e.message : "Backend unavailable" });
-      setItems(PREVIEW); setAudit([]); setMeta(null); setSelectedId((prev) => PREVIEW.some((i) => i.id === prev) ? prev : PREVIEW[0].id);
-    }
-  }, []);
+      setConnection({ status: "preview", reason: e instanceof Error ? e.message : "Backend unavailable" });
+      setItems(DEMO_ITEMS); setAudit([]); setMeta(null);
+      setSelectedId((prev) => DEMO_ITEMS.some((i) => i.id === prev) ? prev : DEMO_ITEMS[0].id);
+    } finally { onChange?.(); }
+  }, [onChange]);
 
   useEffect(() => {
+    if (injected) { void refresh(injected); return; }
     const saved = ss.get("punchpay_passcode"); const savedRole = ss.get("punchpay_role");
     if (savedRole === "contractor" || savedRole === "homeowner") setRoleState(savedRole);
-    setPasscode(saved); setDraft(saved); void refresh(saved);
-  }, [refresh]);
+    setPasscode(saved); setDraft(saved);
+    void refresh(liveBackend(saved));
+  }, [injected, refresh]);
   useEffect(() => {
-    const onFocus = () => { if (passcode) void refresh(passcode); }; // signed image URLs are short-lived
+    if (simulation || !passcode) return;
+    const onFocus = () => void refresh(backend); // signed image URLs are short-lived
     window.addEventListener("focus", onFocus); return () => window.removeEventListener("focus", onFocus);
-  }, [passcode, refresh]);
+  }, [simulation, passcode, backend, refresh]);
+  useEffect(() => {
+    if (focusOutcome.current && outcomeRef.current) { outcomeRef.current.focus(); focusOutcome.current = false; }
+  });
 
-  const setRole = (r: Role) => { setRoleState(r); ss.set("punchpay_role", r); setConfirming(null); };
-  const unlock = (e: React.FormEvent) => { e.preventDefault(); setPasscode(draft); ss.set("punchpay_passcode", draft); void refresh(draft); };
-  const lock = () => { setPasscode(""); setDraft(""); ss.set("punchpay_passcode", ""); void refresh(""); };
+  const allowed: Role[] = meta?.roles?.length ? meta.roles : ["homeowner", "contractor"];
+  const setRole = (r: Role) => { if (!allowed.includes(r)) return; setRoleState(r); if (!simulation) ss.set("punchpay_role", r); setConfirming(null); };
+  const unlock = (e: React.FormEvent) => { e.preventDefault(); setPasscode(draft); ss.set("punchpay_passcode", draft); setConnection({ status: "loading", reason: "Checking passcode…" }); void refresh(liveBackend(draft)); };
+  const lock = () => { setPasscode(""); setDraft(""); ss.set("punchpay_passcode", ""); void refresh(liveBackend("")); };
 
   const selected = items.find((i) => i.id === selectedId) || items[0];
-  const live = connection.live;
   const totals = useMemo(() => ({
     all: items.reduce((s, i) => s + i.amount_cents, 0),
-    held: items.filter((i) => ["authorized", "submitted", "reviewed", "capture_pending", "void_pending", "payment_error"].includes(i.state)).reduce((s, i) => s + i.amount_cents, 0),
+    held: items.filter((i) => HELD.includes(i.state)).reduce((s, i) => s + i.amount_cents, 0),
     paid: items.filter((i) => i.state === "captured").reduce((s, i) => s + i.amount_cents, 0),
-    released: items.filter((i) => i.state === "voided").reduce((s, i) => s + i.amount_cents, 0),
-    closed: items.filter((i) => i.state === "captured" || i.state === "voided").length
+    released: items.filter((i) => i.state === "voided" || i.state === "hold_ended").reduce((s, i) => s + i.amount_cents, 0),
+    closed: items.filter((i) => ["captured", "voided", "hold_ended"].includes(i.state)).length
   }), [items]);
 
-  async function act(key: string, path: string, body?: object, form?: FormData) {
+  async function run(key: string, task: () => Promise<ActionResult | void>, { focus = false } = {}) {
     setBusy(key); setNotice(null);
     try {
-      const res = await fetch(path, { method: "POST", headers: { "x-demo-passcode": passcode, ...(form ? {} : { "Content-Type": "application/json" }) }, body: form ?? JSON.stringify(body ?? {}) });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json.error || `Request failed (${res.status})`);
-      if (json.message) setNotice({ text: json.message, ok: true });
-      else if (json.capture_id) setNotice({ text: `PayPal capture ${json.capture_id} · ${json.paypal_status}`, ok: true });
-      else if (json.authorization_id && json.state === "voided") setNotice({ text: `Authorization ${json.authorization_id} · ${json.paypal_status}`, ok: true });
-    } catch (e) { setNotice({ text: e instanceof Error ? e.message : "Action failed", ok: false }); }
-    finally { setConfirming(null); await refresh(passcode); setBusy(null); }
+      const json = (await task()) || {};
+      if (json.already) setNotice({ text: "Already recorded. Nothing was sent to PayPal again.", ok: true });
+      else if (json.message) setNotice({ text: json.message, ok: true });
+      else if (json.capture_id) setNotice({ text: `${simulation ? "Simulated capture" : "PayPal capture"} ${json.capture_id} · ${json.paypal_status}`, ok: true });
+      else if (json.authorization_id && json.state === "voided") setNotice({ text: `${simulation ? "Simulated authorization" : "Authorization"} ${json.authorization_id} · ${json.paypal_status}`, ok: true });
+      focusOutcome.current = focus;
+    } catch (e) { setNotice({ text: e instanceof Error ? e.message : "Action failed", ok: false }); focusOutcome.current = focus; }
+    finally { setConfirming(null); await refresh(backend); setBusy(null); }
   }
+  const act = (key: string, action: Action, body?: object, opts?: { focus?: boolean }) => run(key, () => backend.post(selected.id, action, body), opts);
   const upload = (stage: "before" | "after", file: File) => {
     if (file.size > 4 * 1024 * 1024) { setNotice({ text: "Images must be 4 MB or smaller.", ok: false }); return; }
-    const form = new FormData(); form.append("stage", stage); form.append("file", file);
-    void act(`upload-${stage}`, `/api/items/${selected.id}/upload`, undefined, form);
+    void run(`upload-${stage}`, () => backend.upload(selected.id, stage, file));
   };
+  const simApprove = () => run("sim-hold", async () => {
+    const order = await backend.post(selected.id, "create-order");
+    await backend.simulateBuyerApproval!(String(order.id));
+    const auth = await backend.post(selected.id, "authorize");
+    return { message: `Simulated hold ${auth.id} · ${auth.status}. Funds held for this item only.` };
+  });
 
   const step = nextStep(selected);
   const idx = items.indexOf(selected);
-  const canUpload = live && role === "contractor" && ["authorized", "submitted", "reviewed"].includes(selected.state);
+  const canUpload = live && role === "contractor" && ["authorized", "submitted", "reviewed"].includes(selected.state) && !selected.homeowner_decision;
   const itemEvents = audit.filter((e) => e.item_id === selected.id);
-  const isTerminal = selected.state === "captured" || selected.state === "voided";
+  const isTerminal = ["captured", "voided", "hold_ended"].includes(selected.state);
+  const missing = missingEvidence(selected);
+  const source = simulation ? "simulated PayPal" : "PayPal";
+  const Source = simulation ? "Simulated PayPal" : "PayPal"; // sentence-initial
+  const retry = selected.state === "reviewed" ? selected.homeowner_decision : null;
 
-  return <div className="page">
+  return <div className={cx("page", simulation && "is-simulation")}>
     <header className="masthead">
       <a className="wordmark" href="/" aria-label="PunchPay home"><span className="mark" aria-hidden="true"><Check size={14} strokeWidth={3} /></span>PunchPay</a>
       <p className="masthead-meta"><span>Closeout dossier</span><span>No. 001</span><span>Oak Street, Austin TX</span></p>
       <div className="masthead-controls">
-        <div className="role-switch" role="radiogroup" aria-label="Viewing as">
+        {allowed.length > 1 ? <div className="role-switch" role="radiogroup" aria-label="Viewing as">
           <span className="role-label">Viewing as</span>
-          {(["homeowner", "contractor"] as Role[]).map((r) => <button key={r} type="button" role="radio" aria-checked={role === r} className={cx(role === r && "is-on")} onClick={() => setRole(r)}>{r === "homeowner" ? "Homeowner" : "Contractor"}</button>)}
-        </div>
-        <span className="sandbox-flag" title="All payments use the PayPal sandbox. No real money moves.">Sandbox</span>
+          {(["homeowner", "contractor"] as Role[]).map((r) => <button key={r} type="button" role="radio" aria-checked={role === r} className={cx(role === r && "is-on")} onClick={() => setRole(r)}>{roleName(r)}</button>)}
+        </div> : <p className="role-fixed"><span className="role-label">Signed in as</span>{roleName(allowed[0])}</p>}
+        <span className={cx("sandbox-flag", simulation && "is-sim")} title={simulation ? "Offline simulation. No PayPal or Claude calls are made." : "All payments use the PayPal sandbox. No real money moves."}>{simulation ? "Simulation" : "Sandbox"}</span>
       </div>
     </header>
 
-    {!live && <div className="access-band" role="region" aria-label="Demo access">
-      <p><LockKeyhole size={15} aria-hidden="true" /><span><b>Design preview.</b> {connection.reason}</span></p>
+    {banner}
+
+    {!simulation && !live && <div className="access-band" role="region" aria-label="Demo access">
+      <p><LockKeyhole size={15} aria-hidden="true" /><span>{connection.status === "loading" ? <b>{connection.reason}</b> : <><b>Design preview.</b> {connection.reason} <a href="/simulation">Or open the offline simulation.</a></>}</span></p>
       <form onSubmit={unlock}>
         <label className="sr-only" htmlFor="passcode">Demo passcode</label>
         <input id="passcode" type="password" autoComplete="off" placeholder="Demo passcode" value={draft} onChange={(e) => setDraft(e.target.value)} />
-        <button type="submit" className="btn btn-ink">Unlock</button>
+        <button type="submit" className="btn btn-ink" disabled={!draft || connection.status === "loading"}>Unlock</button>
       </form>
     </div>}
 
-    <main>
+    <main aria-busy={connection.status === "loading"}>
       <section className="cover" aria-labelledby="cover-title">
         <div className="cover-text">
           <p className="kicker">Project closeout · Two outstanding fixes</p>
           <h1 id="cover-title">Every fix reviewed.<br /><em>Every payment decided.</em></h1>
           <p className="lede">Each fix has its own PayPal hold, its own photo evidence and its own decision. Claude describes what the photos show; the homeowner alone decides what gets paid.</p>
         </div>
-        <dl className="tally" aria-label="Payment summary">
+        <div className="tally-wrap"><dl className="tally" aria-label="Payment summary">
           <div><dt>Under contract</dt><dd>{money(totals.all)}</dd></div>
-          <div><dt>Held in PayPal</dt><dd>{money(totals.held)}</dd></div>
+          <div><dt>Held in {source}</dt><dd>{money(totals.held)}</dd></div>
           <div className="t-paid"><dt>Paid to contractor</dt><dd>{money(totals.paid)}</dd></div>
           <div className="t-released"><dt>Released to homeowner</dt><dd>{money(totals.released)}</dd></div>
-          <p className="tally-foot">{totals.closed} of {items.length} items closed · amounts from PayPal-verified states</p>
         </dl>
+          <p className="tally-foot">{totals.closed} of {items.length} items closed · {simulation ? "simulated states, not PayPal records" : live ? "amounts from PayPal-verified states" : "preview, no data loaded"}</p></div>
       </section>
 
       <div className="dossier">
@@ -170,78 +201,101 @@ export default function Dashboard() {
               <p className="file-amount">{money(selected.amount_cents)}<small>USD · fixed by contract</small></p>
             </div>
             <ol className="steps" aria-label="Progress">
-              {STEPS.map((s, i) => <li key={s} className={cx(i < stepIndex(selected.state) && "is-done", i === stepIndex(selected.state) && !isTerminal && "is-now")}><span>{i < stepIndex(selected.state) ? <Check size={11} strokeWidth={3} /> : i + 1}</span>{s}</li>)}
+              {STEPS.map((s, i) => { const at = stepIndex(selected.state); return <li key={s} className={cx(i < at && "is-done", i === at && !isTerminal && "is-now")} aria-current={i === at && !isTerminal ? "step" : undefined}><span>{i < at ? <Check size={11} strokeWidth={3} aria-hidden="true" /> : i + 1}</span>{s}</li>; })}
             </ol>
-            <div className={cx("next-step", step.who && step.who !== role && "is-elsewhere")}>
-              <p><span className="ns-label">{step.who ? `Next · ${step.who === "homeowner" ? "Homeowner" : "Contractor"}` : isTerminal ? "Closed" : "Attention"}</span>{step.text}</p>
-              {step.who && step.who !== role && <button type="button" className="btn btn-quiet" onClick={() => setRole(step.who!)}>Switch to {step.who} <ArrowRight size={14} aria-hidden="true" /></button>}
+            <div className={cx("next-step", step.who && step.who !== role && "is-elsewhere", selected.state === "payment_error" && "is-alert")} aria-live="polite">
+              <p><span className="ns-label">{step.who ? `Next · ${roleName(step.who)}` : isTerminal ? "Closed" : "Attention"}</span>{step.text}</p>
+              {step.who && step.who !== role && allowed.includes(step.who) && <button type="button" className="btn btn-quiet" onClick={() => setRole(step.who!)}>Switch to {step.who} <ArrowRight size={14} aria-hidden="true" /></button>}
             </div>
           </header>
 
           <section className="file-section">
             <h3><span className="sec-num">{ROMAN[0]}</span>Agreed acceptance criteria</h3>
-            <ol className="criteria">{selected.acceptance_criteria.split(/;\s*/).filter(Boolean).map((c, i) => <li key={i}>{c.charAt(0).toUpperCase() + c.slice(1).replace(/\.$/, "")}</li>)}</ol>
+            <ol className="criteria">{criteriaOf(selected).map((c, i) => <li key={i}>{c.charAt(0).toUpperCase() + c.slice(1)}</li>)}</ol>
           </section>
 
           <section className="file-section">
-            <h3><span className="sec-num">{ROMAN[1]}</span>Funds hold<small>PayPal Orders v2 · AUTHORIZE</small></h3>
-            {selected.paypal_auth_id ? <p className="hold-line"><ShieldCheck size={16} aria-hidden="true" /><span>{selected.state === "captured" ? <>The {money(selected.amount_cents)} hold was captured after the homeowner accepted the work.</> : selected.state === "voided" ? <>The {money(selected.amount_cents)} hold was voided after the homeowner rejected the work.</> : <>{money(selected.amount_cents)} authorized by the homeowner and held by PayPal for this item only. Nothing is charged until the homeowner decides.</>}<code>{selected.paypal_auth_id}</code></span></p>
-              : role === "homeowner" && live && meta?.paypal.configured && meta.paypal.clientId ? <div className="hold-action">
-                <p>Approve a hold of <b>{money(selected.amount_cents)}</b> for this fix. PayPal reserves the funds; nothing is captured now.</p>
-                <PayPalButton clientId={meta.paypal.clientId} itemId={selected.id} passcode={passcode} onSettled={(text, ok) => { setNotice({ text, ok }); void refresh(passcode); }} />
-                {selected.state === "order_created" && <button type="button" className="btn btn-quiet" disabled={!!busy} onClick={() => act("sync", `/api/items/${selected.id}/sync`)}><RefreshCcw size={14} aria-hidden="true" />Already approved? Check PayPal status</button>}
+            <h3><span className="sec-num">{ROMAN[1]}</span>Funds hold<small>{simulation ? "Simulated Orders v2 · AUTHORIZE" : "PayPal Orders v2 · AUTHORIZE"}</small></h3>
+            {selected.paypal_auth_id ? <p className="hold-line"><ShieldCheck size={16} aria-hidden="true" /><span>
+              {selected.state === "captured" ? <>The {money(selected.amount_cents)} hold was captured after the homeowner accepted the work.</>
+                : selected.state === "voided" ? <>The {money(selected.amount_cents)} hold was voided after the homeowner rejected the work.</>
+                : selected.state === "hold_ended" ? <>{Source} reports this hold <b>{selected.paypal_status}</b>. It ended before any money moved; nothing was paid for this item.</>
+                : <>{money(selected.amount_cents)} authorized by the homeowner and held by {source} for this item only. Nothing is charged until the homeowner decides.{selected.paypal_auth_expires_at && <span className="hold-expiry"><Hourglass size={12} aria-hidden="true" />Hold valid until {when(selected.paypal_auth_expires_at)}</span>}</>}
+              <code>{selected.paypal_auth_id}</code></span></p>
+              : role !== "homeowner" ? <p className="muted-line">Waiting for the homeowner to approve this hold in PayPal.</p>
+              : simulation && live ? <div className="hold-action">
+                <p>Approve a hold of <b>{money(selected.amount_cents)}</b> for this fix. In the live app this opens PayPal’s sandbox checkout; here a simulated buyer approves it.</p>
+                <button type="button" className="btn btn-ink" disabled={!!busy} onClick={simApprove}>{busy === "sim-hold" ? "Placing the simulated hold…" : `Approve ${money(selected.amount_cents)} hold (simulated buyer)`}</button>
               </div>
-              : <p className="muted-line">{!live ? "Unlock the demo to approve holds in the PayPal sandbox." : role !== "homeowner" ? "Waiting for the homeowner to approve this hold in PayPal." : "PayPal sandbox credentials are not configured on the server."}</p>}
+              : live && meta?.paypal.configured && meta.paypal.clientId ? <div className="hold-action">
+                <p>Approve a hold of <b>{money(selected.amount_cents)}</b> for this fix. PayPal reserves the funds; nothing is captured now.</p>
+                <PayPalButton clientId={meta.paypal.clientId} itemId={selected.id} passcode={passcode} onSettled={(text, ok) => { setNotice({ text, ok }); void refresh(backend); }} />
+                {selected.state === "order_created" && <button type="button" className="btn btn-quiet" disabled={!!busy} onClick={() => act("sync", "sync")}><RefreshCcw size={14} aria-hidden="true" />{busy === "sync" ? "Checking PayPal…" : "Already approved? Check PayPal status"}</button>}
+              </div>
+              : <p className="muted-line">{!live ? "Unlock the demo to approve holds in the PayPal sandbox." : "PayPal sandbox credentials are not configured on the server."}</p>}
           </section>
 
           <section className="file-section">
-            <h3><span className="sec-num">{ROMAN[2]}</span>Photo evidence<small>Submitted by the contractor</small></h3>
-            <div className="evidence-pair">
-              <EvidencePane stage="before" src={selected.before_url} hasPhoto={!!selected.before_path} canUpload={canUpload} busy={!!busy} onUpload={(f) => upload("before", f)} />
-              <EvidencePane stage="after" src={selected.after_url} hasPhoto={!!selected.after_path} canUpload={canUpload} busy={!!busy} onUpload={(f) => upload("after", f)} />
-            </div>
+            <h3><span className="sec-num">{ROMAN[2]}</span>Photo evidence<small>{simulation ? "Synthetic illustrations · labeled" : "Submitted by the contractor"}</small></h3>
+            <EvidenceCompare before={selected.before_url} after={selected.after_url}>
+              <div className="evidence-pair">
+                <EvidencePane stage="before" src={selected.before_url} hasPhoto={!!selected.before_path} canUpload={canUpload} busy={!!busy} onUpload={(f) => upload("before", f)} />
+                <EvidencePane stage="after" src={selected.after_url} hasPhoto={!!selected.after_path} canUpload={canUpload} busy={!!busy} onUpload={(f) => upload("after", f)} />
+              </div>
+            </EvidenceCompare>
             {busy?.startsWith("upload") && <p className="inline-note" role="status">Uploading and checking the image…</p>}
-            {role === "contractor" && <p className="fine">{canUpload ? "JPG, PNG or WebP up to 4 MB. Photos are stored privately and shown through short-lived links. Replacing a photo clears the previous review." : selected.paypal_auth_id ? "Evidence is locked once the homeowner has decided." : "Photos can be submitted once the homeowner has approved this hold."}</p>}
+            {missing && selected.paypal_auth_id && !isTerminal && <p className="missing-note"><CircleAlert size={14} aria-hidden="true" />{missing}</p>}
+            {role === "contractor" && <p className="fine">{canUpload ? (simulation ? "JPG, PNG or WebP up to 4 MB. In the simulation, your photo never leaves this browser tab." : "JPG, PNG or WebP up to 4 MB. Photos are re-encoded with location and camera metadata removed, stored privately, and shown through short-lived links. Replacing a photo clears the previous review.") : selected.paypal_auth_id ? "Evidence is locked once the homeowner has decided." : "Photos can be submitted once the homeowner has approved this hold."}</p>}
           </section>
 
           <section className="file-section">
-            <h3><span className="sec-num">{ROMAN[3]}</span>Advisory evidence review<small>Claude · describes, never decides</small></h3>
-            {selected.ai_review ? <AdvisoryReport report={selected.ai_review} />
-              : <p className="muted-line">{selected.before_path && selected.after_path ? "Photos are in. The contractor can request the advisory review." : "Claude compares the before and after photos against each criterion once both are submitted, and says plainly what it cannot see."}</p>}
-            {role === "contractor" && live && (selected.state === "submitted" || selected.state === "reviewed") && <>
-              <button type="button" className="btn btn-outline" disabled={!!busy || !meta?.ai.configured} onClick={() => act("review", `/api/items/${selected.id}/review`)}>
+            <h3><span className="sec-num">{ROMAN[3]}</span>Advisory evidence review<small>{simulation ? "Fixture · not a live model" : "Claude · describes, never decides"}</small></h3>
+            {busy === "review" ? <div className="report-loading" role="status"><span className="pulse" aria-hidden="true" />{simulation ? "Loading the fixture review…" : "Claude is comparing the before and after photos against each criterion…"}</div>
+              : selected.ai_review ? <AdvisoryReport report={selected.ai_review} />
+              : <p className="muted-line">{missing ? `The review needs both photos. ${missing}` : "Photos are in. The contractor can request the advisory review."}</p>}
+            {role === "contractor" && live && (selected.state === "submitted" || selected.state === "reviewed" || (selected.state === "authorized" && selected.paypal_auth_id)) && !selected.homeowner_decision && <>
+              <button type="button" className="btn btn-outline" disabled={!!busy || !meta?.ai.configured || !!missing} onClick={() => act("review", "review")} aria-describedby={missing ? "review-why" : undefined}>
                 <Sparkles size={15} aria-hidden="true" />{busy === "review" ? "Reviewing photos…" : selected.ai_review ? "Run the review again" : "Request advisory review"}
               </button>
+              {missing && <p className="fine" id="review-why">Unavailable until both photos are submitted.</p>}
               {!meta?.ai.configured && <p className="fine">ANTHROPIC_API_KEY is not set on the server; no sample report is substituted.</p>}
             </>}
           </section>
 
           <section className="file-section decision">
             <h3><span className="sec-num">{ROMAN[4]}</span>Homeowner decision</h3>
-            {selected.state === "captured" ? <div className="outcome outcome-paid" role="status">
+            {selected.state === "captured" ? <div className="outcome outcome-paid" role="status" tabIndex={-1} ref={outcomeRef}>
               <span className="seal" aria-hidden="true"><Check size={22} strokeWidth={2.5} /></span>
-              <div><p className="outcome-title">Accepted. {money(selected.amount_cents)} paid to the contractor.</p><p>PayPal capture <code>{selected.paypal_capture_id}</code> reports <b>{selected.paypal_status}</b>{selected.decision_at && <> · decided {when(selected.decision_at)}</>}</p></div>
+              <div><p className="outcome-title">Accepted. {money(selected.amount_cents)} paid to the contractor.</p><p>{simulation ? "Simulated capture" : "PayPal capture"} <code>{selected.paypal_capture_id}</code> reports <b>{selected.paypal_status}</b>{selected.decision_at && <> · decided {when(selected.decision_at)}</>}</p></div>
             </div>
-              : selected.state === "voided" ? <div className="outcome outcome-released" role="status">
+              : selected.state === "voided" ? <div className="outcome outcome-released" role="status" tabIndex={-1} ref={outcomeRef}>
                 <span className="seal" aria-hidden="true"><X size={20} strokeWidth={2.5} /></span>
-                <div><p className="outcome-title">Rejected. The {money(selected.amount_cents)} hold was released.</p><p>PayPal authorization <code>{selected.paypal_auth_id}</code> reports <b>{selected.paypal_status}</b>. The homeowner was not charged for this item.</p></div>
+                <div><p className="outcome-title">Rejected. The {money(selected.amount_cents)} hold was released.</p><p>{simulation ? "Simulated authorization" : "PayPal authorization"} <code>{selected.paypal_auth_id}</code> reports <b>{selected.paypal_status}</b>. The homeowner was not charged for this item.</p></div>
+              </div>
+              : selected.state === "hold_ended" ? <div className="outcome outcome-released" role="status" tabIndex={-1} ref={outcomeRef}>
+                <span className="seal" aria-hidden="true"><Hourglass size={20} strokeWidth={2} /></span>
+                <div><p className="outcome-title">Closed without payment.</p><p>{Source} reports the hold <b>{selected.paypal_status}</b>{selected.paypal_capture_id && <> (capture <code>{selected.paypal_capture_id}</code>)</>}. No money reached the contractor. A new agreement is needed to pay for this item.</p></div>
               </div>
               : selected.state === "reviewed" && role === "homeowner" ? (confirming ? <div className="confirm" role="group" aria-label="Confirm decision">
-                <p>{confirming === "accepted" ? <>Capture <b>{money(selected.amount_cents)}</b> from this item’s PayPal hold and pay the contractor?</> : <>Void this item’s <b>{money(selected.amount_cents)}</b> hold? The contractor will not be paid for it.</>}</p>
+                <p>{confirming === "accepted" ? <>Capture <b>{money(selected.amount_cents)}</b> from this item’s {source} hold and pay the contractor?</> : <>Void this item’s <b>{money(selected.amount_cents)}</b> hold? The contractor will not be paid for it.</>}</p>
                 <div className="confirm-actions">
-                  <button type="button" className={confirming === "accepted" ? "btn btn-pine" : "btn btn-clay"} disabled={!!busy || !live} autoFocus onClick={() => act("decide", `/api/items/${selected.id}/decision`, { decision: confirming })}>{busy === "decide" ? "Waiting for PayPal…" : confirming === "accepted" ? "Confirm and pay" : "Confirm and release"}</button>
+                  <button type="button" className={confirming === "accepted" ? "btn btn-pine" : "btn btn-clay"} disabled={!!busy || !live} autoFocus onClick={() => act("decide", "decision", { decision: confirming }, { focus: true })}>{busy === "decide" ? `Waiting for ${source}…` : confirming === "accepted" ? "Confirm and pay" : "Confirm and release"}</button>
                   <button type="button" className="btn btn-quiet" disabled={!!busy} onClick={() => setConfirming(null)}>Cancel</button>
                 </div>
+              </div> : retry ? <div className="decide">
+                <p className="retry-note">Your earlier {retry === "accepted" ? "acceptance" : "rejection"} did not reach {source}, and {source} confirms no money moved. You can retry the same decision; it cannot be changed once recorded.</p>
+                <button type="button" className={retry === "accepted" ? "btn btn-pine" : "btn btn-outline-clay"} disabled={!!busy || !live} onClick={() => setConfirming(retry)}>{retry === "accepted" ? <><Check size={16} aria-hidden="true" />Retry: accept and pay {money(selected.amount_cents)}</> : <><X size={15} aria-hidden="true" />Retry: reject and release</>}</button>
               </div> : <div className="decide">
                 <button type="button" className="btn btn-pine" disabled={!!busy || !live} onClick={() => setConfirming("accepted")}><Check size={16} aria-hidden="true" />Accept and pay {money(selected.amount_cents)}</button>
                 <button type="button" className="btn btn-outline-clay" disabled={!!busy || !live} onClick={() => setConfirming("rejected")}><X size={15} aria-hidden="true" />Reject and release</button>
-                <p className="fine">Your decision is yours. The review above is advisory and is not consulted when money moves.</p>
+                <p className="fine">Your decision is yours. The review above is advisory and is not consulted when money moves.{selected.ai_review?.assessment !== "appears_satisfied" && " If the evidence is unclear, you can also ask the contractor for a clearer photo before deciding."}</p>
               </div>)
-              : ["capture_pending", "void_pending", "payment_error"].includes(selected.state) ? <div className="reconcile">
-                <p>{selected.state === "payment_error" ? "PayPal’s response was not confirmed, so PunchPay stopped instead of retrying." : "PayPal has not reported a final status yet."}{selected.last_error && <small>{selected.last_error}</small>}</p>
-                <button type="button" className="btn btn-outline" disabled={!!busy || !live} onClick={() => act("sync", `/api/items/${selected.id}/sync`)}><RefreshCcw size={14} aria-hidden="true" />{busy === "sync" ? "Checking PayPal…" : "Reconcile with PayPal"}</button>
+              : ["capture_pending", "void_pending", "payment_error"].includes(selected.state) ? <div className="reconcile" tabIndex={-1} ref={outcomeRef}>
+                <p>{selected.state === "payment_error" ? `${Source}’s response was not confirmed, so PunchPay stopped instead of retrying.` : `${Source} has not reported a final status yet.`}{selected.last_error && <small>{selected.last_error}</small>}</p>
+                <button type="button" className="btn btn-outline" disabled={!!busy || !live} onClick={() => act("sync", "sync")}><RefreshCcw size={14} aria-hidden="true" />{busy === "sync" ? `Checking ${source}…` : `Reconcile with ${source}`}</button>
+                <p className="fine">Reconcile only reads from {source}. It never captures, voids or retries.</p>
               </div>
-              : <p className="muted-line">{selected.state === "reviewed" ? "Waiting for the homeowner to decide." : "The decision opens once evidence has been submitted and reviewed."}</p>}
+              : <p className="muted-line">{selected.state === "reviewed" ? "Waiting for the homeowner to decide." : missing && selected.paypal_auth_id ? "The decision opens once both photos are in and the advisory review is recorded." : "The decision opens once evidence has been submitted and reviewed."}</p>}
           </section>
 
           <section className="file-section">
@@ -252,7 +306,7 @@ export default function Dashboard() {
       </div>
 
       <section className="register" aria-labelledby="ledger-title">
-        <div className="register-head"><h2 id="ledger-title">Payments ledger</h2><p>Every reference below came back from the PayPal sandbox API. Statuses are confirmed by a follow-up GET, never assumed.</p></div>
+        <div className="register-head"><h2 id="ledger-title">Payments ledger</h2><p>{simulation ? "References beginning SIM- come from the in-browser PayPal fake. They are not PayPal transactions." : "Every reference below came back from the PayPal sandbox API. Statuses are confirmed by a follow-up GET, never assumed."}</p></div>
         <Ledger items={items} />
         <div className="register-head"><h2>Project record</h2><p>All events across both items, newest first.</p></div>
         <Timeline events={audit} items={items} />
@@ -260,12 +314,15 @@ export default function Dashboard() {
     </main>
 
     <footer className="colophon">
-      <p>PunchPay · Built for the PayPal AI Hackathon 2026 · PayPal sandbox only, no real money · Not escrow, inspection or certification.</p>
-      {live && <button type="button" className="text-button" onClick={lock}><LockKeyhole size={13} aria-hidden="true" />Lock demo</button>}
+      <p>PunchPay · Built for the PayPal AI Hackathon 2026 · {simulation ? "Offline simulation, fixture data only" : "PayPal sandbox only, no real money"} · Not escrow, inspection or certification.</p>
+      {!simulation && live && <button type="button" className="text-button" onClick={lock}><LockKeyhole size={13} aria-hidden="true" />Lock demo</button>}
+      {simulation ? <a className="text-button" href="/">Live sandbox app</a> : <a className="text-button" href="/simulation">Offline simulation</a>}
     </footer>
 
-    {notice && <div className={cx("toast", !notice.ok && "is-error")} role={notice.ok ? "status" : "alert"}>
-      <span>{notice.text}</span><button type="button" aria-label="Dismiss" onClick={() => setNotice(null)}><X size={15} /></button>
-    </div>}
+    <div className="toast-region" aria-live="polite">
+      {notice && <div className={cx("toast", !notice.ok && "is-error")} role={notice.ok ? "status" : "alert"}>
+        <span>{notice.text}</span><button type="button" aria-label="Dismiss" onClick={() => setNotice(null)}><X size={15} /></button>
+      </div>}
+    </div>
   </div>;
 }
