@@ -5,22 +5,25 @@
  */
 import { readFile, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { PayPalSandbox, approvalUrl, amount } from "./paypal-core.mjs";
 
-const stateFile = new URL("../.paypal-sandbox-state.json", import.meta.url);
-const cmd = process.argv[2];
-const ITEMS = { paint: { cents: 3000, description: "Paint touch-up · Living room north wall" }, tile: { cents: 2000, description: "Tile repair · Kitchen backsplash" } };
-const api = new PayPalSandbox({ clientId: process.env.PAYPAL_CLIENT_ID, secret: process.env.PAYPAL_CLIENT_SECRET, merchantId: process.env.PAYPAL_MERCHANT_ID });
-const returnUrl = `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/?sandbox-proof=approved`;
+export const ITEMS = { paint: { cents: 3000, description: "Paint touch-up · Living room north wall" }, tile: { cents: 2000, description: "Tile repair · Kitchen backsplash" } };
 
+/**
+ * The three proof commands. The CLI (bottom of file) wires them to the real sandbox client and the
+ * gitignored state file; tests/proof-rehearsal.test.mjs wires them to the offline simulator instead.
+ */
+export function proofCommands({ api, stateFile, returnUrl = "http://localhost:3000/?sandbox-proof=approved", argv = [], log = console.log }) {
 async function load() { try { return JSON.parse(await readFile(stateFile, "utf8")); } catch { return {}; } }
 async function save(data) { await writeFile(stateFile, JSON.stringify(data, null, 2)); }
 const ref = (s, slug) => `proof-${s.run}-${slug}`;
 const stamp = () => new Date().toISOString();
+const console = { log };
 
 async function create() {
   const s = await load();
-  if (process.argv.includes("--fresh") || !s.run) { for (const k of Object.keys(s)) delete s[k]; s.run = randomUUID().slice(0, 8); s.started = stamp(); }
+  if (argv.includes("--fresh") || !s.run) { for (const k of Object.keys(s)) delete s[k]; s.run = randomUUID().slice(0, 8); s.started = stamp(); }
   for (const [slug, { cents, description }] of Object.entries(ITEMS)) {
     if (!s[slug]?.orderId) {
       const { order, payee } = await api.createOrder({ referenceId: ref(s, slug), description, cents, requestId: `punchpay-proof-${s.run}-${slug}-order`, returnUrl });
@@ -58,7 +61,7 @@ async function settle() {
     const v = await api.voidAuthorization(s.tile.authorizationId, { cents: ITEMS.tile.cents, requestId: `punchpay-void-${s.tile.authorizationId}`, orderId: s.tile.orderId });
     Object.assign(s.tile, { voidStatus: v.status, voidedAt: stamp() }); await save(s);
   }
-  await verify(s);
+  return verify(s);
 }
 
 /** Independent GETs after the fact; nothing here moves money. */
@@ -77,11 +80,35 @@ async function verify(s = null) {
   s.verification = result; await save(s);
   console.log("\nINDEPENDENTLY VERIFIED SANDBOX OUTCOMES (GET):");
   console.log(JSON.stringify(result, null, 2));
-  const ok = capture.status === "COMPLETED" && capture.amount?.value === "30.00" && tileAuth.status === "VOIDED";
+  const linkedAuth = capture.supplementary_data?.related_ids?.authorization_id;
+  const checks = {
+    "paint capture COMPLETED for $30.00": capture.status === "COMPLETED" && capture.amount?.value === "30.00",
+    "paint capture belongs to the paint authorization": !linkedAuth || linkedAuth === s.paint.authorizationId,
+    "paint authorization CAPTURED": paintAuth.status === "CAPTURED",
+    "tile authorization VOIDED": tileAuth.status === "VOIDED"
+  };
+  for (const [name, pass] of Object.entries(checks)) console.log(`${pass ? "PASS" : "FAIL"}  ${name}`);
+  const ok = Object.values(checks).every(Boolean);
   console.log(ok ? "\nGATE PASSED: $30 capture COMPLETED, $20 authorization VOIDED, payee = contractor merchant." : "\nGATE NOT PASSED: see statuses above.");
-  if (!ok) process.exitCode = 1;
+  return { ok, result, checks };
 }
 
-const commands = { create, settle, verify: () => verify() };
-if (!commands[cmd]) { console.error("Usage: npm run sandbox:create [-- --fresh] | sandbox:settle | sandbox:verify"); process.exit(1); }
-commands[cmd]().catch((error) => { console.error("SANDBOX GATE BLOCKED:", error.message); process.exitCode = 1; });
+return { create, settle, verify: () => verify() };
+}
+
+const isCli = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+if (isCli) {
+  const cmd = process.argv[2];
+  const run = async () => {
+    const api = new PayPalSandbox({ clientId: process.env.PAYPAL_CLIENT_ID, secret: process.env.PAYPAL_CLIENT_SECRET, merchantId: process.env.PAYPAL_MERCHANT_ID });
+    const commands = proofCommands({
+      api, argv: process.argv,
+      stateFile: new URL("../.paypal-sandbox-state.json", import.meta.url),
+      returnUrl: `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/?sandbox-proof=approved`
+    });
+    const outcome = await commands[cmd]();
+    if (outcome && outcome.ok === false) process.exitCode = 1;
+  };
+  if (!["create", "settle", "verify"].includes(cmd)) { console.error("Usage: npm run sandbox:create [-- --fresh] | sandbox:settle | sandbox:verify"); process.exit(1); }
+  run().catch((error) => { console.error("SANDBOX GATE BLOCKED:", error.message); process.exitCode = 1; });
+}

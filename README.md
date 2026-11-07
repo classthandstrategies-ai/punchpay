@@ -7,7 +7,7 @@ PunchPay is an AI-assisted renovation closeout app made for the [PayPal AI Hacka
 | Area | Status | Evidence |
 | --- | --- | --- |
 | Typecheck, production build | Passing | `npm run typecheck`, `npm run build` |
-| Payment flows, image checks, scenarios | 42 offline tests passing | `npm test` |
+| Payment flows, image checks, scenarios, proof-script rehearsal | 46 offline tests passing | `npm test` |
 | Database guards (state machine, audit, reset) | Passing on PostgreSQL 16 | `npm run test:db` |
 | Browser tests incl. axe accessibility, desktop + mobile | 22 passing | `npm run test:e2e` |
 | Offline simulation of six payment scenarios | Working, labeled "Simulation" | `/simulation` |

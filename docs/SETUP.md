@@ -50,6 +50,7 @@ npm run sandbox:create   # two AUTHORIZE orders; prints two approval links
 npm run sandbox:settle   # authorize both, capture paint $30, void tile $20
 npm run sandbox:verify   # GET-only: capture COMPLETED, tile VOIDED, payee = PAYPAL_MERCHANT_ID
 ```
+The same three commands are rehearsed offline against the simulator in `tests/proof-rehearsal.test.mjs` (part of `npm test`). That proves the script's logic, not PayPal's behavior. Without `.env.local`, the commands stop with `node: .env.local: not found`. With missing variables, they stop with `SANDBOX GATE BLOCKED`, before any network call.
 Copy the redacted IDs, statuses and timestamps into `docs/PROOF-SANDBOX.md`.
 
 ## 4. Low-disk machines

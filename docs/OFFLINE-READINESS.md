@@ -2,12 +2,12 @@
 
 Scope: offline development only. No cloud provisioning, deployment, GitHub/Supabase account or external payment was attempted. **The real PayPal and Claude flows have not been run and are not certified.**
 
-## Test results (rerun on Nov 8, 2026; Node 24.21.0, Next 16.4.5)
+## Test results (rerun on Nov 8, 2026 after disk recovery; Node 24.21.0, Next 16.4.5, PostgreSQL 16.15)
 | Check | Command | Result |
 | --- | --- | --- |
 | Typecheck | `npm run typecheck` | Clean |
 | Production build | `npm run build` | Succeeds |
-| Unit / flow tests | `npm test` | **42 / 42 pass**: flows 17, paypal-core 13, scenarios 7, image 5 |
+| Unit / flow tests | `npm test` | **46 / 46 pass**: flows 17, paypal-core 13, scenarios 7, image 5, proof rehearsal 4 (the original 42 also passed on their own before the rehearsal was added) |
 | Database guards | `npm run test:db` | `DB GUARD TESTS PASSED` (standalone PostgreSQL 16.15, both migrations + seed; no Docker) |
 | Browser + accessibility | `npm run test:e2e` | **22 pass** (11 tests × desktop 1440×900 + Pixel 7), axe with no violations; 2 screenshot tests skipped unless `SCREENSHOTS=1` |
 | Screenshots | `SCREENSHOTS=1 npx playwright test e2e/screenshots.spec.ts` | 7 desktop + 7 mobile in `docs/screenshots/` |
@@ -32,7 +32,15 @@ Scope: offline development only. No cloud provisioning, deployment, GitHub/Supab
    - inconclusive review
    - capture failure → reconcile
    - duplicate accept → refused, with a single capture
-6. **Docs.** README, [ARCHITECTURE](ARCHITECTURE.md), [SETUP](SETUP.md), [INTEGRATION-PLAN](INTEGRATION-PLAN.md), DEMO-SCRIPT and SUBMISSION were all updated.
+6. **Proof commands ready.** `sandbox:create`, `sandbox:settle` and `sandbox:verify` are reviewed and refactored into testable commands. The CLI behaves the same. `verify` now also requires the paint authorization to be `CAPTURED`, and the capture to belong to it. The commands are rehearsed offline (`tests/proof-rehearsal.test.mjs`), which is not proof. Missing credentials stop the commands with `SANDBOX GATE BLOCKED` before any network call.
+7. **Publishing prepared.**
+   - Git integrity: `git fsck` is clean, and the 3 local commits (`9b256ad`, `4f96ef2`, `de81ae8`) sit on top of the old remote's `2a0abdc`.
+   - No `.env*` file other than `.env.example` has ever been tracked.
+   - A scan of all history found no key patterns.
+   - Playwright output is now gitignored.
+   - The old remote is renamed `legacy-origin` with push disabled, and `main` has no upstream.
+   - Exact push steps are in the INTEGRATION-PLAN gate 5.
+8. **Docs.** README, [ARCHITECTURE](ARCHITECTURE.md), [SETUP](SETUP.md), [INTEGRATION-PLAN](INTEGRATION-PLAN.md), DEMO-SCRIPT and SUBMISSION were all updated.
 
 ## Security findings and resolutions
 | Area | Finding | Resolution | Regression test |
@@ -66,8 +74,9 @@ Scope: offline development only. No cloud provisioning, deployment, GitHub/Supab
   - the JS SDK popup approval has never been exercised
 - **No Supabase project.** Real Postgres over the Supabase API and the Storage signed-URL paths have never been exercised. The SQL itself is tested on plain PostgreSQL 16.
 - **No `ANTHROPIC_API_KEY`.** No live Claude report has been produced.
-- **GitHub is deferred** to a new dedicated account. Nothing has been pushed from this state.
-- **The internal disk is ~99% full** (≈250 MB free at the last check). All work uses the T7 volume. Freeing space is the owner's call.
+- **GitHub:** waiting for the new dedicated account and an empty repository. Nothing has been pushed.
+- **Disk:** resolved. The internal disk is at 67% (6.5 GB free) and SMART reports Verified.
+- **Commit-author email (owner decision).** All 9 commits carry the previous account's author email. Push as is, or rewrite before the first push; see INTEGRATION-PLAN gate 5. Nothing has been rewritten.
 
 ## Credentials still required (put in `.env.local`, never in chat or git)
 `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `PAYPAL_MERCHANT_ID` (sandbox Business), plus a sandbox Personal buyer login (used in the browser only) · `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` · `ANTHROPIC_API_KEY` · chosen `HOMEOWNER_PASSCODE`, `CONTRACTOR_PASSCODE`, `DEMO_PASSCODE`.

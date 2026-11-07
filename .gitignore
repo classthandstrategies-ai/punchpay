@@ -13,3 +13,5 @@ node_modules
 supabase/.temp
 supabase/.branches
 .tmp-pg-tmp2
+test-results
+playwright-report

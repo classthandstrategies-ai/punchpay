@@ -12,7 +12,22 @@
    - authorizes both, with a stable `PayPal-Request-Id` for each;
    - GETs each authorization to verify payee and amount;
    - captures $30.00 on paint and voids tile.
-4. `npm run sandbox:verify`: independent GETs of the capture and both authorizations. It passes only if capture = `COMPLETED`, tile authorization = `VOIDED`, and both authorizations report `payee.merchant_id` = contractor.
+4. `npm run sandbox:verify`: independent GETs of the capture and both authorizations. Nothing here moves money. It prints a PASS/FAIL line per check and passes only if all of these hold:
+   - the paint capture is `COMPLETED` for exactly $30.00;
+   - the capture belongs to the paint authorization (checked whenever PayPal reports the link);
+   - the paint authorization is `CAPTURED`;
+   - the tile authorization is `VOIDED`;
+   - both authorizations name the contractor as payee, directly or via their parent order.
+
+Re-running `create`, `settle` or `verify` is safe. Saved orders are reused, completed steps are skipped, and retries use the same `PayPal-Request-Id`. `npm run sandbox:create -- --fresh` starts a new run.
+
+**Offline rehearsal (not proof):** `tests/proof-rehearsal.test.mjs` runs these exact commands against the in-memory simulator. It covers four cases:
+- partial approval is refused
+- the full pass moves money exactly twice
+- reruns move nothing
+- a declined capture fails the gate, and a payee mismatch blocks settle before money moves
+
+It shows the script is ready; it says nothing about PayPal's real responses.
 
 ## Payee verification approach
 From the official Orders v2 / Payments v2 OpenAPI schemas (read Nov 8, 2026):

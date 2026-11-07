@@ -8,9 +8,35 @@ The application is complete against its interfaces. Each external service plugs 
 | 2 | **Supabase** | Create a **new** project in a dedicated account (the old org has an unpaid-invoice block). Put `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in `.env.local`. | Apply both migrations, then the seed (`docs/SETUP.md` §2). Set the passcodes. `npm run dev` → unlock. | Both items load. A photo upload appears with a signed URL. A refresh keeps state. Table Editor shows audit rows. |
 | 3 | **Anthropic** | Put `ANTHROPIC_API_KEY` in `.env.local`. | Upload the four staged photos; request a review on each item. | Each report shows "Live analysis · `<model>`" with per-criterion evidence and a non-empty "cannot show" list. |
 | 4 | **End-to-end** | Have the Personal buyer logged in in a second window. | Follow the web walkthrough in `README.md`: approve both holds, upload, review, accept paint, reject tile, refresh. | Ledger shows the paint capture `COMPLETED` and the tile authorization `VOIDED`. A second accept says "Already recorded". Reconcile re-checks by GET only. Mobile and desktop screenshots are taken. |
-| 5 | **GitHub** | Configure the new dedicated GitHub account and repository (public, MIT). | `git remote add origin …` then `git push -u origin main` | README, LICENSE and docs are visible. No `.env*` files are in history (`git log --all -- .env.local` is empty). |
+| 5 | **GitHub** | Create an **empty** repository in the new dedicated account: no README, license or .gitignore, so history stays linear. Decide the commit-author question (below). | See "Publishing from the new GitHub account" below | README, LICENSE and docs are visible. The new repo's history matches local `main` commit for commit. |
 | 6 | **Hosting** (optional) | Pick a host. Set the same env vars there. Set `NEXT_PUBLIC_APP_URL`. | Deploy, then repeat gate 4 against the URL. | The judge URL works with the presenter passcode, and `/simulation` works with no passcode. |
 | 7 | **Submission** | Record a video under 3 minutes (`DEMO-SCRIPT.md`). Upload it to YouTube as public. Submit on Devpost. | Fill `docs/SUBMISSION.md` → Technical proof from `docs/PROOF-SANDBOX.md` only. | Submitted before **Nov 12, 2026, 12:00 PM PST**. |
+
+## Publishing from the new GitHub account
+The local repository is prepared:
+- The old remote is renamed `legacy-origin`, and its push URL is disabled.
+- `main` has no upstream, so a bare `git push` cannot reach the old account.
+
+When the new empty repository exists:
+```bash
+# 1. Pre-push checks (each must print nothing / pass)
+git status --short                                    # clean tree
+git ls-files | grep -E '^\.env' | grep -v '^\.env\.example$'   # no env files tracked
+git log --all --name-only --format= | grep -E '\.env\.local|paypal-sandbox-state' # never in history
+npm run typecheck && npm test && npm run test:db && npm run build && npm run test:e2e
+# 2. Point at the new account and push the full history
+git remote add origin https://github.com/<new-account>/punchpay.git
+git push -u origin main
+# 3. Optional, once the push is confirmed
+git remote remove legacy-origin
+```
+**Commit-author decision (owner only).** All 9 existing commits record the author email used by the previous account. Pushing them publishes that email under the new repository. There are two options:
+- **(a)** Push as is. This preserves history exactly, and is the default.
+- **(b)** Before the first push, rewrite the author identity to the new account's noreply email (`git filter-repo --mailmap`). This changes every commit hash, so the old hashes in docs and the old remote no longer match.
+
+Do not do (b) without an explicit decision. Either way, set the new identity for future commits with `git config user.name` / `git config user.email`.
+
+Optional before going public: `CLAUDE.md`, `CLAUDE-KICKOFF-PROMPT.md`, `AGENTS.md` and `TEAM-PLAN.md` are internal working notes. They contain no secrets, but they mention an unrelated project by name. Keep them (transparent process) or remove them in a normal commit (history keeps them).
 
 ## Things to verify against the live sandbox (not provable offline)
 - Whether the create-order response includes `purchase_units[0].payee.merchant_id` with `Prefer: return=representation`. If it doesn't, the code already falls back to a GET of the order.
