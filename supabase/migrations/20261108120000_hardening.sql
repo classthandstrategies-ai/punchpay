@@ -57,6 +57,11 @@ begin
     ('authorized', 'authorized'), ('authorized', 'submitted'), ('authorized', 'hold_ended'),
     ('submitted', 'submitted'), ('submitted', 'reviewed'), ('submitted', 'hold_ended'),
     ('reviewed', 'reviewed'), ('reviewed', 'submitted'), ('reviewed', 'capture_pending'), ('reviewed', 'void_pending'), ('reviewed', 'hold_ended'),
+    -- A reconcile may find a late capture or void that PayPal processed after the item had already
+    -- been returned to `reviewed` (the request outlived PunchPay's timeout and the in-flight wait).
+    -- Recording PayPal's real outcome must never be refused; punch_items_captured_has_id and
+    -- punch_items_voided_is_rejection still require the matching homeowner decision (and a capture id).
+    ('reviewed', 'captured'), ('reviewed', 'voided'),
     ('capture_pending', 'capture_pending'), ('capture_pending', 'captured'), ('capture_pending', 'payment_error'), ('capture_pending', 'reviewed'), ('capture_pending', 'hold_ended'),
     ('void_pending', 'void_pending'), ('void_pending', 'voided'), ('void_pending', 'payment_error'), ('void_pending', 'reviewed'), ('void_pending', 'hold_ended'),
     ('payment_error', 'payment_error'), ('payment_error', 'captured'), ('payment_error', 'capture_pending'), ('payment_error', 'voided'), ('payment_error', 'reviewed'), ('payment_error', 'hold_ended'),

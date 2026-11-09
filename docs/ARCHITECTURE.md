@@ -62,6 +62,8 @@ stateDiagram-v2
   payment_error --> voided: reconcile (GET) finds void
   payment_error --> reviewed: reconcile confirms nothing moved (decision kept)
   reviewed --> hold_ended: PayPal reports EXPIRED / DENIED / VOIDED
+  reviewed --> captured: reconcile (GET) finds a late capture (acceptance on record)
+  reviewed --> voided: reconcile (GET) finds a late void (rejection on record)
   payment_error --> hold_ended
   captured --> [*]
   voided --> [*]
@@ -73,7 +75,7 @@ stateDiagram-v2
 | Guarantee | App (`lib/flows.ts`, core) | Database (migrations) |
 | --- | --- | --- |
 | The AI never moves money | `decide` never reads the report | n/a |
-| One capture or void per item | Compare-and-set claim `reviewed → *_pending`; PayPal-Request-Id keyed on the authorization | Transition whitelist; `capture_is_final`; unique PayPal IDs |
+| One capture or void per item | Compare-and-set claim `reviewed → *_pending`; a GET of the authorization before every capture or void refuses a hold PayPal already settled; PayPal-Request-Id keyed on the authorization is a second layer, since its retention can lapse unsignalled | Transition whitelist; `capture_is_final`; unique PayPal IDs |
 | Who gets paid | Payee is checked on the order, on the authorization (or via its parent order), and again before capture or void | `payee_merchant_id` recorded |
 | Order ownership | `reference_id` = item ID, and the auth→order and capture→auth links are checked | Order, auth and capture IDs are immutable once set |
 | No invented outcomes | "Unknown" only if the request may have reached PayPal. Reconcile is GET-only and refuses captures the homeowner did not accept | `captured` needs a capture ID + acceptance; `voided` needs a rejection |

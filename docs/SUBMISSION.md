@@ -17,7 +17,7 @@ PunchPay turns each leftover fix into its own small, independent payment decisio
 
 ## How we built it
 - **Next.js 16 + TypeScript**, deployed as a single app. Every money-moving call runs server-side.
-- **PayPal Orders v2** (`intent: AUTHORIZE`, contractor explicitly named as `payee.merchant_id`) and **Payments v2** (capture, void, GET verification). A stable `PayPal-Request-Id` is keyed to each PayPal resource, so a retry replays the request instead of moving money twice.
+- **PayPal Orders v2** (`intent: AUTHORIZE`, contractor explicitly named as `payee.merchant_id`) and **Payments v2** (capture, void, GET verification). A stable `PayPal-Request-Id` is keyed to each PayPal resource, so a retry inside PayPal's retention window replays instead of moving money twice. That window is short and PayPal does not signal when it lapses, so the authoritative guard is a GET of the authorization before every capture or void: PunchPay never relies on replay alone.
 - **Claude** (`claude-opus-5-5`, vision, structured JSON output). Server-side rules stop the label from ever being stronger than the per-criterion evidence.
 - **Supabase Postgres + private Storage.**
   - A database trigger enforces the item state machine and makes PayPal IDs and decisions immutable once recorded.

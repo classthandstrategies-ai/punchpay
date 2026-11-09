@@ -285,6 +285,8 @@ export default function Dashboard({ backend: injected, banner, initial, onChange
               </div> : retry ? <div className="decide">
                 <p className="retry-note">Your earlier {retry === "accepted" ? "acceptance" : "rejection"} did not reach {source}, and {source} confirms no money moved. You can retry the same decision; it cannot be changed once recorded.</p>
                 <button type="button" className={retry === "accepted" ? "btn btn-pine" : "btn btn-outline-clay"} disabled={!!busy || !live} onClick={() => setConfirming(retry)}>{retry === "accepted" ? <><Check size={16} aria-hidden="true" />Retry: accept and pay {money(selected.amount_cents)}</> : <><X size={15} aria-hidden="true" />Retry: reject and release</>}</button>
+                <button type="button" className="btn btn-quiet" disabled={!!busy || !live} onClick={() => act("sync", "sync")}><RefreshCcw size={14} aria-hidden="true" />{busy === "sync" ? `Checking ${source}…` : `Re-check ${source} first`}</button>
+                <p className="fine">If {source} settled the earlier request after PunchPay gave up, re-checking records that outcome instead of moving money again.</p>
               </div> : <div className="decide">
                 <button type="button" className="btn btn-pine" disabled={!!busy || !live} onClick={() => setConfirming("accepted")}><Check size={16} aria-hidden="true" />Accept and pay {money(selected.amount_cents)}</button>
                 <button type="button" className="btn btn-outline-clay" disabled={!!busy || !live} onClick={() => setConfirming("rejected")}><X size={15} aria-hidden="true" />Reject and release</button>

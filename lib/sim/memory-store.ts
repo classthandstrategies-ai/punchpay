@@ -13,7 +13,9 @@ const ALLOWED: Record<ItemState, ItemState[]> = {
   order_created: ["order_created", "awaiting_authorization", "authorized"],
   authorized: ["authorized", "submitted", "hold_ended"],
   submitted: ["submitted", "reviewed", "hold_ended"],
-  reviewed: ["reviewed", "submitted", "capture_pending", "void_pending", "hold_ended"],
+  // `reviewed -> captured/voided`: a reconcile may find a late capture or void that PayPal processed
+  // after the item was returned to `reviewed`. The guards below still require the matching decision.
+  reviewed: ["reviewed", "submitted", "capture_pending", "void_pending", "hold_ended", "captured", "voided"],
   capture_pending: ["capture_pending", "captured", "payment_error", "reviewed", "hold_ended"],
   void_pending: ["void_pending", "voided", "payment_error", "reviewed", "hold_ended"],
   payment_error: ["payment_error", "captured", "capture_pending", "voided", "reviewed", "hold_ended"],

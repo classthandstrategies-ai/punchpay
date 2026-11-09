@@ -110,6 +110,71 @@ test("PayPal unreachable: reconcile waits out the in-flight window, keeps the de
   assert.equal(w.fake.movements.length, 1);
 });
 
+test("PayPal-Request-Id lapsed: a late capture is recorded by GET, and the retry is refused", async () => {
+  // PayPal's documented retention for a PayPal-Request-Id is as short as 6 hours (Payments/Orders
+  // v2), after which a retry with the same ID is processed as a NEW request and PayPal signals
+  // nothing. So replay must never be the thing that prevents a second capture: the GET-verified
+  // authorization status is. This is the worst ordering - the capture PunchPay gave up on is
+  // processed by PayPal only after reconcile had already returned the item to `reviewed`.
+  let t = Date.parse("2026-11-09T10:00:00Z");
+  const w = world({ now: () => t });
+  await readyForDecision(w, PAINT);
+
+  w.fake.faults.captureUnreachable = true;
+  assert.equal((await decide(w.deps, PAINT, "accepted")).state, "payment_error");
+  const parked = await w.store.get(PAINT);
+  w.store.items.set(PAINT, { ...parked, decision_at: new Date(t).toISOString() });
+  t += IN_FLIGHT_MS + 1000;
+  assert.equal((await sync(w.deps, PAINT)).state, "reviewed", "PayPal reported no movement");
+
+  // Hours pass: the capture request ID is no longer honoured, and PayPal processes the capture.
+  t += 7 * 60 * 60 * 1000;
+  w.fake.lapseIdempotencyKeys();
+  const item = await w.store.get(PAINT);
+  w.fake.capture(item.paypal_auth_id);
+  assert.equal(w.fake.movements.length, 1);
+
+  // Retrying the acceptance must be refused by the preflight GET, before any capture POST.
+  const posted = posts(w.fake, /capture$/).length;
+  await rejectsWith(decide(w.deps, PAINT, "accepted"), 409, /CAPTURED/);
+  assert.equal(posts(w.fake, /capture$/).length, posted, "no capture POST after the preflight refusal");
+  assert.equal(w.fake.movements.length, 1, "no second capture once the request ID lapsed");
+
+  // And reconcile must be able to record PayPal's real outcome from `reviewed`, not refuse it.
+  const synced = await sync(w.deps, PAINT);
+  assert.equal(synced.state, "captured"); assert.equal(synced.paypal_status, "COMPLETED");
+  const after = await w.store.get(PAINT);
+  assert.equal(after.state, "captured"); assert.equal(after.homeowner_decision, "accepted");
+  assert.ok(after.paypal_capture_id, "capture id recorded");
+  assert.equal(w.fake.movements.length, 1);
+});
+
+test("a late void is recorded from `reviewed` too, and only for a rejection", async () => {
+  const w = world();
+  await readyForDecision(w, TILE, "visible_concern");
+  // The rejection was recorded and the void request was sent, but its outcome was never seen, so
+  // reconcile had returned the item to `reviewed` with the decision kept.
+  await w.store.claim(TILE, "reviewed", "void_pending", { homeowner_decision: "rejected", decision_at: new Date().toISOString() });
+  await w.store.claim(TILE, "void_pending", "reviewed", {});
+  const item = await w.store.get(TILE);
+  assert.equal(item.homeowner_decision, "rejected");
+
+  w.fake.auths.get(item.paypal_auth_id).status = "VOIDED"; // PayPal processed the void late
+  const synced = await sync(w.deps, TILE);
+  assert.equal(synced.state, "voided"); assert.equal(synced.paypal_status, "VOIDED");
+  assert.equal((await w.store.get(TILE)).state, "voided");
+  assert.ok(w.store.audit.some((e) => e.action === "reconciled_void"));
+
+  // The same transition is impossible without a rejection on record: the paint item was accepted.
+  await readyForDecision(w, PAINT);
+  await w.store.claim(PAINT, "reviewed", "capture_pending", { homeowner_decision: "accepted", decision_at: new Date().toISOString() });
+  await w.store.claim(PAINT, "capture_pending", "reviewed", {});
+  w.fake.auths.get((await w.store.get(PAINT)).paypal_auth_id).status = "VOIDED";
+  const paint = await sync(w.deps, PAINT);
+  assert.equal(paint.state, "hold_ended", "a void with an acceptance on record is never recorded as `voided`");
+  assert.equal(w.fake.movements.length, 0, "reconcile moved no money");
+});
+
 test("expired hold: decision refused BEFORE claiming, item ends as hold_ended, nothing posted", async () => {
   const w = world();
   const item = await readyForDecision(w, TILE);

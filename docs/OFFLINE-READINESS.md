@@ -1,4 +1,4 @@
-# Offline readiness report (Nov 8, 2026)
+# Offline readiness report (Nov 8, 2026; follow-up review Nov 9, 2026)
 
 Scope: offline development only. No cloud provisioning, deployment, GitHub/Supabase account or external payment was attempted. **The real PayPal and Claude flows have not been run and are not certified.**
 
@@ -7,7 +7,7 @@ Scope: offline development only. No cloud provisioning, deployment, GitHub/Supab
 | --- | --- | --- |
 | Typecheck | `npm run typecheck` | Clean |
 | Production build | `npm run build` | Succeeds |
-| Unit / flow tests | `npm test` | **46 / 46 pass**: flows 17, paypal-core 13, scenarios 7, image 5, proof rehearsal 4 (the original 42 also passed on their own before the rehearsal was added) |
+| Unit / flow tests | `npm test` | **48 / 48 pass** (rerun Nov 9, 2026): flows 19, paypal-core 13, scenarios 7, image 5, proof rehearsal 4 |
 | Database guards | `npm run test:db` | `DB GUARD TESTS PASSED` (standalone PostgreSQL 16.15, both migrations + seed; no Docker) |
 | Browser + accessibility | `npm run test:e2e` | **22 pass** (11 tests × desktop 1440×900 + Pixel 7), axe with no violations; 2 screenshot tests skipped unless `SCREENSHOTS=1` |
 | Screenshots | `SCREENSHOTS=1 npx playwright test e2e/screenshots.spec.ts` | 7 desktop + 7 mobile in `docs/screenshots/` |
@@ -62,8 +62,19 @@ Scope: offline development only. No cloud provisioning, deployment, GitHub/Supab
 | Audit integrity | An audit failure after money moved | Never throws or re-sends | flows (`failAudit`) |
 | Demo reset safety | Reset could wipe in-flight or open payments | Locks rows; refuses capture/void pending and `payment_error`; refuses open holds unless `punchpay_reset_demo(true)`; archives first | guards |
 
+## Follow-up review (Nov 9, 2026)
+`PayPal-Request-Id` retention was the one open question answerable without credentials, so it was checked against PayPal's documentation. The docs conflict: **6 hours** by default (Orders v2 use cases; Payments v1 → v2 upgrade guide), extendable to 72 hours by arrangement, against up to 45 days on the general "API requests" page, with the idempotency reference deferring to each API's own page. The upgrade guide warns that past the window a retry is processed as a **new** transaction and **nothing signals it**.
+
+Reviewing PunchPay against that worst case found, and fixed, a real defect:
+
+| Area | Finding | Resolution | Regression test |
+| --- | --- | --- | --- |
+| Reconciliation | A capture or void PayPal processed *after* reconcile had already returned the item to `reviewed` could never be recorded: `reviewed → captured` and `reviewed → voided` were missing from the transition whitelist. The money had moved, the item stuck in `reviewed`, reconcile failed with a generic "the database refused this change", and retrying the decision answered "use Reconcile to record PayPal's state" — which then failed too. | Both transitions allowed, in the trigger and in the in-memory store. `punch_items_captured_has_id` and `punch_items_voided_is_rejection` still require the matching homeowner decision (and, for a capture, a capture ID), so only a GET-verified outcome the homeowner actually chose can be recorded. | flows ("PayPal-Request-Id lapsed…", late void), guards (both transitions, and a capture still refused on a rejected item) |
+
+The window itself is **not** what protects against a double capture. A retry is only reachable from `reviewed`, and both `decide` and `sync` GET the authorization first, so a hold PayPal already captured reports `CAPTURED` and the retry is refused before any POST. Replay is a second layer covering the ~60 s lost-response window.
+
 **Open (documented, not fixed):**
-- How long PayPal retains a `PayPal-Request-Id` has not been verified against PayPal's docs.
+- PayPal's documented retention figure for `PayPal-Request-Id` is self-contradictory (above). Treat 6 hours as the floor and confirm with PayPal for the account in use; PunchPay's correctness does not rest on it.
 - Reset does not delete evidence files from storage; their paths are archived.
 - Passcodes are not accounts.
 - There are no webhooks.

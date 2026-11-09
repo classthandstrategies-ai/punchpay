@@ -41,6 +41,14 @@ select pg_temp.expect_error(format($q$update public.punch_items set state='captu
 update public.punch_items set state='reviewed', ai_review='{"assessment":"appears_satisfied"}' where id=:paint;
 select pg_temp.expect_error(format($q$update public.punch_items set paypal_auth_id='AUTH-OTHER' where id=%L$q$, :paint), 'immutable');
 update public.punch_items set state='capture_pending', homeowner_decision='accepted', decision_at=now() where id=:paint;
+-- A capture PayPal processed after the client gave up: reconcile had already returned the item to
+-- `reviewed` with the acceptance kept, so recording PayPal's real outcome must not be refused.
+-- (PayPal's PayPal-Request-Id retention can lapse, so replay is never what prevents a second capture.)
+begin;
+  update public.punch_items set state='reviewed' where id=:paint;
+  update public.punch_items set state='captured', paypal_capture_id='CAP-LATE', paypal_status='COMPLETED' where id=:paint;
+  do $$ begin assert (select state from public.punch_items where slug='paint') = 'captured', 'late capture recorded from reviewed'; end $$;
+rollback;
 select pg_temp.expect_error(format($q$update public.punch_items set after_path='p/swap.jpg' where id=%L$q$, :paint), 'evidence is locked');
 select pg_temp.expect_error(format($q$update public.punch_items set state='captured' where id=%L$q$, :paint), 'captured_has_id');
 update public.punch_items set state='captured', paypal_capture_id='CAP-P', paypal_status='COMPLETED' where id=:paint;
@@ -62,6 +70,12 @@ select pg_temp.expect_error(format($q$update public.punch_items set paypal_captu
 -- unconfirmed response -> payment_error -> reconcile finds no movement -> reviewed, decision KEPT
 update public.punch_items set state='payment_error', last_error='timeout' where id=:tile;
 update public.punch_items set state='reviewed' where id=:tile;
+-- the same for a late void, and a capture is still impossible on a rejected item
+begin;
+  update public.punch_items set state='voided', paypal_status='VOIDED' where id=:tile;
+  do $$ begin assert (select state from public.punch_items where slug='tile') = 'voided', 'late void recorded from reviewed'; end $$;
+rollback;
+select pg_temp.expect_error(format($q$update public.punch_items set state='captured', paypal_capture_id='CAP-LATE', paypal_status='COMPLETED' where id=%L$q$, :tile), 'captured_has_id');
 -- the decision cannot be cleared or flipped after a failed attempt (no capture after a rejection)
 select pg_temp.expect_error(format($q$update public.punch_items set homeowner_decision=null where id=%L$q$, :tile), 'final');
 select pg_temp.expect_error(format($q$update public.punch_items set state='capture_pending', homeowner_decision='accepted' where id=%L$q$, :tile), 'final');

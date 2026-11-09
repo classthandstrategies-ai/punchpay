@@ -78,6 +78,30 @@ export class SimulatedPayPal {
     const auth = this.auths.get(authId);
     if (auth && auth.status === "CREATED") auth.status = "EXPIRED";
   }
+  /**
+   * PayPal processing a capture that PunchPay never saw the response to: the request outlived the
+   * client timeout, so PunchPay gave up, but PayPal completed it server-side afterwards. The
+   * capture is discoverable only by a GET of the authorization or its order.
+   */
+  capture(authId: string) {
+    const auth = this.auths.get(authId);
+    if (!auth) throw new Error(`No simulated authorization ${authId}`);
+    if (auth.status !== "CREATED") throw new Error(`Authorization ${authId} is ${auth.status}, not an open hold`);
+    const capture: Capture = { id: this.id("CAPTURE"), status: "COMPLETED", amount: auth.amount, final_capture: true, create_time: this.iso(), supplementary_data: { related_ids: { authorization_id: auth.id, order_id: auth.supplementary_data.related_ids.order_id } } };
+    this.captures.set(capture.id, capture);
+    auth.status = "CAPTURED";
+    this.movements.push({ kind: "capture", resource_id: capture.id, authorization_id: auth.id, amount: capture.amount.value, status: capture.status, request_id: "(late: response never reached PunchPay)", at: this.iso() });
+    return capture;
+  }
+  /**
+   * Time passing beyond PayPal's `PayPal-Request-Id` retention, after which a retry with the same
+   * ID is treated as a brand-new request instead of replaying the first response — and PayPal
+   * signals nothing when this happens. PunchPay must not rely on replay to prevent a second
+   * capture; the GET-verified authorization status is the authoritative guard.
+   */
+  lapseIdempotencyKeys() {
+    this.replay.clear();
+  }
 
   fetch = async (url: string, opts: { method?: string; headers?: Record<string, string>; body?: string } = {}) => {
     const method = opts.method || "GET";
