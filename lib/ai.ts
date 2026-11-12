@@ -55,8 +55,8 @@ export async function analyze(item: PunchItem): Promise<AIReport> {
   }
 
   const [before, after] = await Promise.all([imageBlock(item.before_path), imageBlock(item.after_path)]);
-  const criteria = item.acceptance_criteria.split(/;\\s*/).map((c) => c.trim().replace(/\\.$/, "")).filter(Boolean);
-  const prompt = `Fix: ${item.title}\\nLocation: ${item.location}\\nScope: ${item.description}\\nAcceptance criteria (assess each one in this exact order; do not add or omit criteria):\\n${criteria.map((c, i) => `${i + 1}. ${c}`).join("\\n")}`;
+  const criteria = item.acceptance_criteria.split(/;\s*/).map((c) => c.trim().replace(/\.$/, "")).filter(Boolean);
+  const prompt = `Fix: ${item.title}\nLocation: ${item.location}\nScope: ${item.description}\nAcceptance criteria (assess each one in this exact order; do not add or omit criteria):\n${criteria.map((c, i) => `${i + 1}. ${c}`).join("\n")}`;
   let out: z.infer<typeof ReportSchema>;
   let model: string;
 
