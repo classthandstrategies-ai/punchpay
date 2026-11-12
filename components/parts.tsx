@@ -72,7 +72,7 @@ export function Timeline({ events, items, compact }: { events: AuditEvent[]; ite
       <div className="tl-body">
         <p className="tl-what">{EVENT_LABEL[e.action] || e.action.replaceAll("_", " ")}</p>
         <p className="tl-meta">
-          <span>{ACTOR[e.actor] || e.actor}</span>
+          <span>{e.action === "evidence_reviewed" && (e.payload as { source?: string })?.source === "prototype_no_model" ? "Prototype review (no model)" : ACTOR[e.actor] || e.actor}</span>
           {items && title(e.item_id) && <span>{title(e.item_id)}</span>}
           <time dateTime={e.created_at}>{when(e.created_at)}</time>
           {eventDetail(e) && <code>{eventDetail(e)}</code>}
@@ -84,10 +84,13 @@ export function Timeline({ events, items, compact }: { events: AuditEvent[]; ite
 
 export function EvidencePane({ stage, src, hasPhoto, canUpload, busy, onUpload }: { stage: "before" | "after"; src?: string | null; hasPhoto: boolean; canUpload: boolean; busy: boolean; onUpload: (f: File) => void }) {
   const input = useRef<HTMLInputElement>(null);
+  // A signed URL that has expired fails to load; fall back to the "link expired" message instead of a blank frame.
+  const [broken, setBroken] = useState<string | null>(null);
+  const shown = src && broken !== src ? src : null;
   const label = stage === "before" ? "Before" : "After";
-  return <figure className={cx("evidence", src && "has-image")}>
+  return <figure className={cx("evidence", shown && "has-image")}>
     <div className="evidence-frame">
-      {src ? <img src={src} alt={`${label} photo submitted by the contractor`} /> :
+      {shown ? <img src={shown} alt={`${label} photo submitted by the contractor`} onError={() => setBroken(shown)} /> :
         <div className="evidence-empty"><span className="crosshair" aria-hidden="true" /><span>{hasPhoto ? "Photo stored · link expired, refresh" : `No ${label.toLowerCase()} photo yet`}</span></div>}
       <span className="evidence-corner">{stage === "before" ? "A" : "B"}</span>
     </div>

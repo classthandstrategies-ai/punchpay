@@ -1,19 +1,20 @@
 # PunchPay
 **Every fix reviewed. Every payment decided.**
 
-PunchPay is an AI-assisted renovation closeout app made for the [PayPal AI Hackathon 2026](https://paypalaihackathon.devpost.com/). Contractors attach before-and-after evidence to independently authorized small fixes; a vision model reports visible support and uncertainty against pre-agreed criteria; homeowners choose whether a specific item is paid (capture) or released (void). All payments in this demo use the **PayPal sandbox**. This is not escrow, construction certification, or a guaranteed payment.
+PunchPay is an AI-assisted renovation closeout app made for the [PayPal AI Hackathon 2026](https://paypalaihackathon.devpost.com/). Contractors attach before-and-after evidence to independently authorized small fixes; an advisory review slot reports per-criterion support and uncertainty (a Claude vision path when a key is configured — **not exercised for this submission**; otherwise a labeled no-model path); homeowners choose whether a specific item is paid (capture) or released (void). All payments in this demo use the **PayPal sandbox**. This is not escrow, construction certification, or a guaranteed payment.
 
-## Project state (Nov 8, 2026)
+## Project state (Nov 12, 2026)
 | Area | Status | Evidence |
 | --- | --- | --- |
 | Typecheck, production build | Passing | `npm run typecheck`, `npm run build` |
-| Payment flows, image checks, scenarios, proof-script rehearsal | 46 offline tests passing | `npm test` |
+| Payment flows, image checks, scenarios, proof-script rehearsal, prototype-path safety | 50 offline tests passing | `npm test` |
 | Database guards (state machine, audit, reset) | Passing on PostgreSQL 16 | `npm run test:db` |
-| Browser tests incl. axe accessibility, desktop + mobile | 22 passing | `npm run test:e2e` |
+| Browser tests incl. axe accessibility, desktop + mobile | 28 passing | `npm run test:e2e` |
 | Offline simulation of six payment scenarios | Working, labeled "Simulation" | `/simulation` |
-| PayPal sandbox proof | **Not run: needs sandbox credentials** | `docs/PROOF-SANDBOX.md` |
-| Supabase persistence, uploads | **Not run: needs a dedicated Supabase project** | |
-| Live Claude review | **Not run: needs `ANTHROPIC_API_KEY`** | |
+| PayPal sandbox proof | **Passed twice** (CLI, and through the app in a browser): $30 captured, $20 voided, payee verified by GET | `docs/PROOF-SANDBOX.md` |
+| Supabase persistence, uploads | Verified on the dedicated project: guards live, uploads stored privately, state survives refresh | `docs/PROOF-SANDBOX.md` (Gate 4) |
+| Live Claude review | **Not run — no key was purchased.** The demo uses the labeled `prototype_no_model` path: no model examined the photos and the report says so | `docs/SETUP.md` §3a |
+| Demo photographs | **Synthetic illustrations**, stamped "SYNTHETIC ILLUSTRATION · NOT A PHOTO" in the image | `lib/sim/illustrations.ts` |
 
 Nothing marked "not run" should be described as working. Full status: [`docs/OFFLINE-READINESS.md`](docs/OFFLINE-READINESS.md).
 
@@ -53,8 +54,8 @@ The CLI should verify `purchase_units[0].payee.merchant_id` is exactly `PAYPAL_M
 
 ## Web walkthrough
 1. **Homeowner**, select paint → PayPal authorize $30, then tile → PayPal authorize $20 (separate approvals).
-2. **Contractor**, upload before and after JPEG/PNG/WebP photos for each item; run live Claude evidence review separately for each item.
-3. **Homeowner**, read Claude's uncertainty, then independently accept paint and reject tile. The server sends capture or void using the PayPal authorization ID saved for the item.
+2. **Contractor**, upload before and after JPEG/PNG/WebP photos for each item; request the advisory review for each item. With `PUNCHPAY_PROTOTYPE_REVIEW=1` and no key, the review records that no model ran.
+3. **Homeowner**, read the review's stated limits, then independently accept paint and reject tile. The server sends capture or void using the PayPal authorization ID saved for the item.
 4. Inspect the two terminal payment statuses and PayPal IDs. Use the Reconcile button after any ambiguous network result instead of retrying money movement.
 
 ## App routes
@@ -64,7 +65,7 @@ The CLI should verify `purchase_units[0].payee.merchant_id` is exactly `PAYPAL_M
 | `POST /api/items/{id}/create-order` | One PayPal Orders v2 AUTHORIZE intent order at server-defined amount |
 | `POST /api/items/{id}/authorize` | Require buyer-approved PayPal order, then authorize it and save auth ID |
 | `POST /api/items/{id}/upload` | Private evidence upload (stage before/after) |
-| `POST /api/items/{id}/review` | Live Claude vision evidence report |
+| `POST /api/items/{id}/review` | Advisory evidence report: Claude vision when `ANTHROPIC_API_KEY` is set, else the labeled no-model prototype path |
 | `POST /api/items/{id}/decision` | Homeowner decision then capture or void; audit response |
 | `POST /api/items/{id}/sync` | GET-only reconcile of an unconfirmed outcome or a stale hold; never moves money |
 
