@@ -50,7 +50,7 @@ test("I · accepted $30 paint repair captures exactly once", async ({ page }) =>
   await expect(decision(page).getByText("Accepted. $30.00 paid to the contractor.")).toBeVisible();
   await expect(decision(page).locator(".outcome")).toBeFocused();
   await expect(page.locator(".sim-count")).toHaveText(/1 capture\(s\) · 0 void\(s\)/);
-  await expect(page.locator(".t-paid dd")).toHaveText("$30.00");
+  await expect(page.locator(".cf-captured .cf-value")).toHaveText("$30.00");
   await noHorizontalScroll(page);
   expect(errors).toEqual([]);
 });
@@ -58,13 +58,13 @@ test("I · accepted $30 paint repair captures exactly once", async ({ page }) =>
 test("II · rejected $20 tile repair voids only the tile hold", async ({ page }) => {
   await scenario(page, "reject-tile");
   await expect(page.getByText("Visible concern against the criteria")).toBeVisible();
-  await page.getByRole("button", { name: "Compare" }).click();
+  await page.getByRole("button", { name: "Overlay & wipe" }).click();
   await page.getByLabel(/Before ⟷ After/).fill("20");
   await page.getByRole("button", { name: "Reject and release" }).click();
   await page.getByRole("button", { name: "Confirm and release" }).click();
   await expect(decision(page).getByText("Rejected. The $20.00 hold was released.")).toBeVisible();
   await expect(page.locator(".sim-count")).toHaveText(/1 capture\(s\) · 1 void\(s\)/);
-  await expect(page.locator(".t-released dd")).toHaveText("$20.00");
+  await expect(page.locator(".cf-voided .cf-value")).toHaveText("$20.00");
 });
 
 test("III · missing evidence blocks review and decision; upload stays in the tab", async ({ page }) => {
@@ -120,6 +120,50 @@ test("VI · duplicate attempt is refused and reconcile finds the single capture"
   await page.getByRole("button", { name: "Send the accept again (second tab)" }).click();
   await expect(page.locator(".sim-actions + .inline-note")).toContainText("already captured");
   await expect(page.locator(".sim-count")).toHaveText(/1 capture\(s\) · 0 void\(s\)/);
+});
+
+test("project closeout reports authorized, captured, voided and duplicates from recorded state", async ({ page }) => {
+  await scenario(page, "accept-paint");
+  const c = page.locator(".closeout");
+  // Both items hold funds, nothing is decided: a zero duplicate count would be unevidenced here.
+  await expect(c.locator(".cf-authorized .cf-value")).toHaveText("$50.00");
+  await expect(c.locator(".cf-captured .cf-value")).toHaveText("$0.00");
+  await expect(c).toContainText("Not measurable yet");
+
+  await page.getByRole("button", { name: "Accept and pay $30.00" }).click();
+  await page.getByRole("button", { name: "Confirm and pay" }).click();
+  await expect(decision(page).getByText("Accepted. $30.00 paid to the contractor.")).toBeVisible();
+  await page.locator(".index-entry", { hasText: "Tile repair" }).click();
+  await page.getByRole("button", { name: "Reject and release" }).click();
+  await page.getByRole("button", { name: "Confirm and release" }).click();
+  await expect(decision(page).getByText("Rejected. The $20.00 hold was released.")).toBeVisible();
+
+  await expect(c.locator(".cf-authorized .cf-value")).toHaveText("$50.00");
+  await expect(c.locator(".cf-captured .cf-value")).toHaveText("$30.00");
+  await expect(c.locator(".cf-voided .cf-value")).toHaveText("$20.00");
+  await expect(c.locator(".cf-dup .cf-value")).toHaveText("0");
+  await expect(c).toContainText("Measured across 1 capture reference");
+  await expect(c).toContainText("simulated states, not PayPal records");
+  await noHorizontalScroll(page);
+});
+
+test("the workspace keeps evidence and the decision together, with milestones and the full log", async ({ page }) => {
+  await scenario(page, "accept-paint");
+  await expect(page.locator(".file-body .col-evidence .evidence-pair")).toBeVisible();
+  await expect(page.locator(".file-body .col-judgment section.decision")).toBeVisible();
+  // Concise milestones are shown; the complete audit history stays reachable.
+  await expect(page.locator(".milestones li")).toHaveCount(5);
+  const log = page.locator("details.full-log");
+  await expect(log.locator(".timeline")).toBeHidden();
+  await log.locator("summary").click();
+  await expect(log.locator(".timeline li").first()).toBeVisible();
+  // Overlay & wipe is reachable and keyboard-operable.
+  await page.getByRole("button", { name: "Overlay & wipe" }).click();
+  const slider = page.getByLabel(/Before ⟷ After/);
+  await slider.focus();
+  await slider.press("ArrowLeft");
+  await expect(slider).toHaveValue("49");
+  await noHorizontalScroll(page);
 });
 
 test("simulated hold approval, keyboard role switching, and labels", async ({ page }) => {

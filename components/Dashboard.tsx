@@ -5,11 +5,10 @@ import type { AuditEvent, PunchItem, Role } from "@/lib/types";
 import { liveBackend, type Action, type ActionResult, type Backend, type Meta } from "@/lib/backend";
 import { DEMO_ITEMS, criteriaOf } from "@/lib/demo-items";
 import PayPalButton from "./PayPalButton";
-import { AdvisoryReport, EvidenceCompare, EvidencePane, Ledger, StatusTag, Timeline, cx, missingEvidence, money, when } from "./parts";
+import { AdvisoryReport, CloseoutSummary, EvidenceCompare, EvidencePane, KeyMilestones, Ledger, StatusTag, Timeline, WorkOverview, closeoutFigures, cx, missingEvidence, money, when } from "./parts";
 
 const ROMAN = ["I", "II", "III", "IV", "V", "VI"];
 const STEPS = ["Funds held", "Photos", "Review", "Decision"];
-const HELD = ["authorized", "submitted", "reviewed", "capture_pending", "void_pending", "payment_error"];
 
 function stepIndex(state: PunchItem["state"]) {
   if (state === "awaiting_authorization" || state === "order_created") return 0;
@@ -100,13 +99,7 @@ export default function Dashboard({ backend: injected, banner, initial, onChange
   const lock = () => { setPasscode(""); setDraft(""); ss.set("punchpay_passcode", ""); void refresh(liveBackend("")); };
 
   const selected = items.find((i) => i.id === selectedId) || items[0];
-  const totals = useMemo(() => ({
-    all: items.reduce((s, i) => s + i.amount_cents, 0),
-    held: items.filter((i) => HELD.includes(i.state)).reduce((s, i) => s + i.amount_cents, 0),
-    paid: items.filter((i) => i.state === "captured").reduce((s, i) => s + i.amount_cents, 0),
-    released: items.filter((i) => i.state === "voided" || i.state === "hold_ended").reduce((s, i) => s + i.amount_cents, 0),
-    closed: items.filter((i) => ["captured", "voided", "hold_ended"].includes(i.state)).length
-  }), [items]);
+  const closeout = useMemo(() => closeoutFigures(items, audit), [items, audit]);
 
   async function run(key: string, task: () => Promise<ActionResult | void>, { focus = false } = {}) {
     setBusy(key); setNotice(null);
@@ -169,21 +162,21 @@ export default function Dashboard({ backend: injected, banner, initial, onChange
     <main aria-busy={connection.status === "loading"}>
       <section className="cover" aria-labelledby="cover-title">
         <div className="cover-text">
-          <p className="kicker">Project closeout · Two outstanding fixes</p>
+          <p className="kicker">Project closeout · {items.length} outstanding {items.length === 1 ? "fix" : "fixes"}</p>
           <h1 id="cover-title">Every fix reviewed.<br /><em>Every payment decided.</em></h1>
-          <p className="lede">Each fix has its own PayPal hold, its own photo evidence and its own decision. Claude describes what the photos show; the homeowner alone decides what gets paid.</p>
+          <p className="lede">A homeowner and a contractor finishing a renovation rarely disagree about the whole job — they disagree about one or two fixes. PunchPay settles them one at a time.</p>
+          <ol className="how" aria-label="How PunchPay works">
+            <li><b>A hold per fix.</b> The homeowner approves a separate PayPal authorization for each item, so money is reserved but not charged.</li>
+            <li><b>Evidence, then a described review.</b> The contractor submits before and after photos; Claude describes what they show against the agreed criteria, and says plainly what it cannot tell.</li>
+            <li><b>The homeowner decides.</b> Accept and that item&rsquo;s hold is captured; reject and it is voided. One item never affects the other, and the review never moves money.</li>
+          </ol>
         </div>
-        <div className="tally-wrap"><dl className="tally" aria-label="Payment summary">
-          <div><dt>Under contract</dt><dd>{money(totals.all)}</dd></div>
-          <div><dt>Held in {source}</dt><dd>{money(totals.held)}</dd></div>
-          <div className="t-paid"><dt>Paid to contractor</dt><dd>{money(totals.paid)}</dd></div>
-          <div className="t-released"><dt>Released to homeowner</dt><dd>{money(totals.released)}</dd></div>
-        </dl>
-          <p className="tally-foot">{totals.closed} of {items.length} items closed · {simulation ? "simulated states, not PayPal records" : live ? "amounts from PayPal-verified states" : "preview, no data loaded"}</p></div>
+        <div className="tally-wrap"><CloseoutSummary f={closeout} simulation={simulation} live={live} /></div>
       </section>
 
       <div className="dossier">
         <nav className="item-index" aria-label="Punch list items">
+          <WorkOverview items={items} selectedId={selected.id} onPick={(id) => { setSelectedId(id); setConfirming(null); }} />
           <p className="index-head">Punch list</p>
           {items.map((item, i) => <button key={item.id} type="button" className={cx("index-entry", item.id === selected.id && "is-current")} aria-current={item.id === selected.id ? "true" : undefined} onClick={() => { setSelectedId(item.id); setConfirming(null); }}>
             <span className="ie-num">{String(i + 1).padStart(2, "0")}</span>
@@ -209,6 +202,8 @@ export default function Dashboard({ backend: injected, banner, initial, onChange
             </div>
           </header>
 
+          <div className="file-body">
+          <div className="col-evidence">
           <section className="file-section">
             <h3><span className="sec-num">{ROMAN[0]}</span>Agreed acceptance criteria</h3>
             <ol className="criteria">{criteriaOf(selected).map((c, i) => <li key={i}>{c.charAt(0).toUpperCase() + c.slice(1)}</li>)}</ol>
@@ -237,7 +232,7 @@ export default function Dashboard({ backend: injected, banner, initial, onChange
 
           <section className="file-section">
             <h3><span className="sec-num">{ROMAN[2]}</span>Photo evidence<small>{simulation ? "Synthetic illustrations · labeled" : "Submitted by the contractor"}</small></h3>
-            <EvidenceCompare before={selected.before_url} after={selected.after_url}>
+            <EvidenceCompare before={selected.before_url} after={selected.after_url} annotated={simulation}>
               <div className="evidence-pair">
                 <EvidencePane stage="before" src={selected.before_url} hasPhoto={!!selected.before_path} canUpload={canUpload} busy={!!busy} onUpload={(f) => upload("before", f)} />
                 <EvidencePane stage="after" src={selected.after_url} hasPhoto={!!selected.after_path} canUpload={canUpload} busy={!!busy} onUpload={(f) => upload("after", f)} />
@@ -248,6 +243,8 @@ export default function Dashboard({ backend: injected, banner, initial, onChange
             {role === "contractor" && <p className="fine">{canUpload ? (simulation ? "JPG, PNG or WebP up to 4 MB. In the simulation, your photo never leaves this browser tab." : "JPG, PNG or WebP up to 4 MB. Photos are re-encoded with location and camera metadata removed, stored privately, and shown through short-lived links. Replacing a photo clears the previous review.") : selected.paypal_auth_id ? "Evidence is locked once the homeowner has decided." : "Photos can be submitted once the homeowner has approved this hold."}</p>}
           </section>
 
+          </div>
+          <div className="col-judgment">
           <section className="file-section">
             <h3><span className="sec-num">{ROMAN[3]}</span>Advisory evidence review<small>{simulation ? "Fixture · not a live model" : "Claude · describes, never decides"}</small></h3>
             {busy === "review" ? <div className="report-loading" role="status"><span className="pulse" aria-hidden="true" />{simulation ? "Loading the fixture review…" : "Claude is comparing the before and after photos against each criterion…"}</div>
@@ -302,8 +299,16 @@ export default function Dashboard({ backend: injected, banner, initial, onChange
 
           <section className="file-section">
             <h3><span className="sec-num">{ROMAN[5]}</span>Record<small>Append-only</small></h3>
-            <Timeline events={itemEvents} compact />
+            {itemEvents.length ? <>
+              <KeyMilestones events={itemEvents} />
+              <details className="full-log">
+                <summary>Full audit history for this item ({itemEvents.length} {itemEvents.length === 1 ? "entry" : "entries"})</summary>
+                <Timeline events={itemEvents} compact />
+              </details>
+            </> : <Timeline events={itemEvents} compact />}
           </section>
+          </div>
+          </div>
         </article>
       </div>
 
