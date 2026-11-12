@@ -79,14 +79,14 @@ The window itself is **not** what protects against a double capture. A retry is 
 - Passcodes are not accounts.
 - There are no webhooks.
 
-## Remaining blockers (updated Nov 12, 2026)
-- **PayPal sandbox: CLEARED.** Gate 1 passed against the live sandbox on Nov 12, 2026. See [PROOF-SANDBOX](PROOF-SANDBOX.md) for the observed order, authorization, capture and void identifiers. The CLI proof is done; the **JS SDK popup approval in the browser has still not been exercised** (gate 4), because that needs a Supabase project to persist against.
-- **No Supabase project.** Real Postgres over the Supabase API and the Storage signed-URL paths have never been exercised. The SQL itself is tested on plain PostgreSQL 16. This blocks gate 4.
-- **No `ANTHROPIC_API_KEY`, and none will be purchased.** No live Claude report exists or will exist for this submission. The credential-free `PUNCHPAY_PROTOTYPE_REVIEW` path records a review that states plainly that no model ran (`source: prototype_no_model`); it is never presented as analysis and never affects a payment.
-- **GitHub:** published. `main` is at `cdf9163`.
+## Remaining blockers (updated Nov 12, 2026, evening)
+- **PayPal sandbox: CLEARED twice.** Gate 1 (CLI) and Gate 4 (browser, JS SDK approval, app-driven capture and void) both passed against the live sandbox. See [PROOF-SANDBOX](PROOF-SANDBOX.md).
+- **Supabase: CLEARED.** Dedicated project confirmed, migrations and seed applied, state-machine and immutability guards verified live, evidence stored privately with signed URLs, refresh retains state.
+- **No `ANTHROPIC_API_KEY`, and none will be purchased.** No live Claude report exists. The demo runs the `PUNCHPAY_PROTOTYPE_REVIEW` path, whose report states that no model ran (`source: prototype_no_model`); it is never presented as analysis and never affects a payment.
+- **Not done:** hosting (optional), the video, and the Devpost submission.
 
 ## Credentials still required (put in `.env.local`, never in chat or git)
-~~`PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `PAYPAL_MERCHANT_ID`~~ (configured; gate 1 passed) · **still needed:** `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and chosen `HOMEOWNER_PASSCODE`, `CONTRACTOR_PASSCODE`, `DEMO_PASSCODE`. `ANTHROPIC_API_KEY` will not be supplied; set `PUNCHPAY_PROTOTYPE_REVIEW=1` instead.
+All configured locally as of Nov 12, 2026 except `ANTHROPIC_API_KEY`, which will not be supplied; `PUNCHPAY_PROTOTYPE_REVIEW=1` is used instead. A deployment needs the same variables set on the host.
 
 ## Steps to live demo certification
 Follow [INTEGRATION-PLAN.md](INTEGRATION-PLAN.md) gates 1–7, in order:

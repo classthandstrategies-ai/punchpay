@@ -1,6 +1,6 @@
 # PayPal sandbox proof (Milestone A)
 
-**Status: PASSED — verified against the live PayPal sandbox on November 12, 2026.** Every value below was returned by the PayPal sandbox REST API and re-read by an independent GET. Nothing here is a placeholder, a simulated reference or a reconstruction: simulated runs use `SIM-` prefixed references and never appear in this file.
+**Status: PASSED — verified against the live PayPal sandbox on November 12, 2026, twice: once by the CLI proof (Gate 1) and once through the web application in a browser (Gate 4).** Every value below was returned by the PayPal sandbox REST API and re-read by an independent GET. Nothing here is a placeholder, a simulated reference or a reconstruction: simulated runs use `SIM-` prefixed references and never appear in this file.
 
 Sandbox only. No live PayPal credentials were ever configured, and no real money moved.
 
@@ -75,6 +75,52 @@ GATE PASSED: $30 capture COMPLETED, $20 authorization VOIDED, payee = contractor
 
 Re-running `verify` reproduces the same statuses, because the two authorizations are now terminal
 (`CAPTURED` and `VOIDED`) and PayPal keeps returning those states.
+
+## Gate 4 — browser-driven run (November 12, 2026)
+A second, independent run through the **web application** against the same sandbox merchant: a fresh
+dedicated Supabase project, the PayPal JS SDK in the browser, a human buyer approval in PayPal's own
+checkout, and the app's own capture and void paths. None of the Gate 1 identifiers above were reused;
+every reference below is new and was returned by PayPal to the running application.
+
+| Field | Paint ($30.00) | Tile ($20.00) |
+| --- | --- | --- |
+| Order (created by the app, `intent: AUTHORIZE`) | `8UH8678723976961K` | `6G652729U10026153` |
+| Buyer approval | sandbox Personal account, in PayPal's checkout, by a human | same |
+| Authorization (via SDK `onApprove` → `/authorize`) | `09R969356M704910B` | `34202835AN046440U` |
+| Capture (via homeowner **Accept**) | `137441455G861562T` · **COMPLETED** · USD 30.00 · `final_capture: true` | n/a — homeowner **Reject** |
+| Final authorization status (GET) | **CAPTURED** | **VOIDED** |
+| Payee merchant ID (GET, via `authorization`) | `F8MFAQQFR7JKA` | `F8MFAQQFR7JKA` |
+| Captures on the order (GET) | **exactly 1** | **0** |
+| Order created (UTC) | 2026-11-12T10:45:40Z | 2026-11-12T10:45:41Z |
+| Authorized (UTC) | 2026-11-12T10:56:25Z | 2026-11-12T10:57:30Z |
+| Decided / settled (UTC) | accepted 11:00:16 · capture 11:00:18 · verified 11:00:21 | rejected 11:00:25 · void verified 11:00:30 |
+
+Independent re-reads after everything settled, including after a deliberate duplicate "accept" and a
+reconcile: `GET /v2/payments/captures/137441455G861562T` → `COMPLETED`, linked to authorization
+`09R969356M704910B` and order `8UH8678723976961K`; the paint order still lists **one** capture; the tile
+order lists **zero** captures and one `VOIDED` authorization.
+
+Also verified in this run:
+- **Persistence.** Supabase `punch_items` ends at `captured` / `voided` with the IDs above, `payee_merchant_id`
+  recorded, `last_error` null. The append-only `audit_events` log holds 14 events in order: two
+  `order_created`, two `authorization_verified`, four evidence uploads, two `evidence_reviewed`,
+  `decision_accepted`, `capture_verified`, `decision_rejected`, `void_verified`. The audit carries exactly
+  one distinct capture ID, which is what the closeout's "0 duplicate captures" is measured from.
+- **Refresh.** A full page reload keeps both outcomes and the $50 / $30 / $20 / 0 closeout.
+- **Reconcile is GET-only.** `/sync` on both items re-read PayPal and reported the existing states; nothing moved.
+- **Duplicate and flipped decisions.** A second "accept" on paint was answered from the record
+  (`already: true`, same capture ID, no PayPal call); an attempt to flip it to "reject" was refused (409).
+- **Evidence.** Four images uploaded through the browser, re-encoded server-side with metadata stripped,
+  stored under UUID names in the private bucket and shown through short-lived signed URLs. They are the
+  project's **labelled synthetic illustrations** (each stamped "SYNTHETIC ILLUSTRATION · NOT A PHOTO"),
+  not photographs.
+- **No AI analysis occurred.** Both reviews were recorded on the credential-free prototype path with
+  `source: prototype_no_model`, assessment `insufficient_evidence`, every criterion `uncertain`, and the
+  report itself states that no model examined the photos. The audit records that source. The decisions
+  and the money were unaffected: `decide()` never reads the review.
+- **Authorization.** Against the live server: 401 without a passcode, 403 when the contractor tries to
+  decide or the homeowner tries to review, 404 for unknown or malformed item IDs, and browser-supplied
+  `capture_id` / `authorization_id` / `amount_cents` are ignored.
 
 ### What this does and does not prove
 Proven against the live sandbox API:
