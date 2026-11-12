@@ -23,7 +23,7 @@ export async function GET(request: Request) {
     return Response.json({
       items, audit: audit || [], mode: "paypal-sandbox", roles,
       paypal: { configured: paypalConfigured(), clientId: process.env.PAYPAL_CLIENT_ID || null },
-      ai: { configured: !!process.env.ANTHROPIC_API_KEY, prototype: prototypeReviewEnabled() }
+      ai: { configured: !!(process.env.ANTHROPIC_API_KEY || process.env.GEMINI_API_KEY), prototype: prototypeReviewEnabled(), provider: process.env.ANTHROPIC_API_KEY ? "claude" : process.env.GEMINI_API_KEY ? "gemini" : null }
     }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) { return responseError(error); }
 }
