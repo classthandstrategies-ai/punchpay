@@ -189,3 +189,50 @@ for (const path of ["/", "/simulation?scenario=reject-tile"]) {
     expect(serious.map((v) => `${v.id}: ${v.nodes.slice(0, 3).map((n) => n.target.join(" ")).join(", ")}`)).toEqual([]);
   });
 }
+
+/* ── Prototype (credential-free) review path ─────────────────────────────────────────────── */
+
+const ITEM = {
+  id: "d28cf4a1-2c7a-49c5-9821-115cbe6c1d11", project_id: "p", slug: "paint", title: "Paint touch-up",
+  location: "Living room · North wall", description: "Repair the scuffed paint beside the window.",
+  acceptance_criteria: "Scuff no longer visibly apparent; Finish looks uniform with the surrounding wall",
+  amount_cents: 3000, currency: "USD", state: "reviewed",
+  paypal_order_id: "9T461067HF380173V", paypal_auth_id: "8KY824692F2241736", paypal_capture_id: null,
+  paypal_status: "CREATED", payee_merchant_id: "F8MFAQQFR7JKA",
+  before_path: "stored", after_path: "stored", before_url: null, after_url: null,
+  homeowner_decision: null, decision_at: null, order_attempt: 1, last_error: null,
+  ai_review: {
+    assessment: "insufficient_evidence",
+    summary: "No AI analysis was performed. This build is running without an Anthropic API key, so nothing has examined these photos. The criteria below are listed unassessed so the homeowner can review the evidence themselves.",
+    criteria: [
+      { criterion: "Scuff no longer visibly apparent", result: "uncertain", evidence: "Not assessed: no model examined this photo." },
+      { criterion: "Finish looks uniform with the surrounding wall", result: "uncertain", evidence: "Not assessed: no model examined this photo." }
+    ],
+    observations: [],
+    uncertainty: ["No model analysed the before or after photo, so nothing here is evidence about them.", "Photos show surface appearance only; hidden workmanship cannot be assessed."],
+    model: "none (prototype path, no model call)", reviewed_at: new Date().toISOString(), source: "prototype_no_model"
+  }
+};
+
+test("the prototype review path can never be read as analysis", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.route("**/api/items", (route) => route.fulfill({
+    status: 200, contentType: "application/json",
+    body: JSON.stringify({ items: [ITEM], audit: [], mode: "paypal-sandbox", roles: ["homeowner", "contractor"],
+      paypal: { configured: true, clientId: "test" }, ai: { configured: false, prototype: true } })
+  }));
+  await page.goto("/");
+  await page.getByLabel("Demo passcode").fill("presenter-1234");
+  await page.getByRole("button", { name: "Unlock" }).click();
+  await expect(page.locator(".report")).toBeVisible();
+  await expect(page.locator(".proto-banner")).toContainText("no AI ran");
+  await expect(page.locator(".report-source")).toContainText("no model call was made");
+  await expect(page.locator(".report-source")).not.toContainText("Live analysis");
+  // Not enough evidence to say — never "appears satisfied".
+  await expect(page.locator(".report-verdict")).toHaveText("Not enough visible evidence to say");
+  await expect(page.locator(".criteria-results .r-supported")).toHaveCount(0);
+  // Neither a coverage read nor a "retake the photo" suggestion is honest when nothing ran.
+  await expect(page.locator(".report-strength")).toHaveCount(0);
+  await expect(page.locator(".report-notes.is-help")).toHaveCount(0);
+  await noHorizontalScroll(page);
+});

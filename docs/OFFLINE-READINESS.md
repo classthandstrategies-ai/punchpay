@@ -79,16 +79,14 @@ The window itself is **not** what protects against a double capture. A retry is 
 - Passcodes are not accounts.
 - There are no webhooks.
 
-## Remaining blockers
-- **No PayPal sandbox credentials.** So:
-  - `docs/PROOF-SANDBOX.md` is still **NOT YET RUN**
-  - the JS SDK popup approval has never been exercised
-- **No Supabase project.** Real Postgres over the Supabase API and the Storage signed-URL paths have never been exercised. The SQL itself is tested on plain PostgreSQL 16.
-- **No `ANTHROPIC_API_KEY`.** No live Claude report has been produced.
-- **GitHub:** waiting for the dedicated account and an empty repository. Nothing has been pushed.
+## Remaining blockers (updated Nov 12, 2026)
+- **PayPal sandbox: CLEARED.** Gate 1 passed against the live sandbox on Nov 12, 2026. See [PROOF-SANDBOX](PROOF-SANDBOX.md) for the observed order, authorization, capture and void identifiers. The CLI proof is done; the **JS SDK popup approval in the browser has still not been exercised** (gate 4), because that needs a Supabase project to persist against.
+- **No Supabase project.** Real Postgres over the Supabase API and the Storage signed-URL paths have never been exercised. The SQL itself is tested on plain PostgreSQL 16. This blocks gate 4.
+- **No `ANTHROPIC_API_KEY`, and none will be purchased.** No live Claude report exists or will exist for this submission. The credential-free `PUNCHPAY_PROTOTYPE_REVIEW` path records a review that states plainly that no model ran (`source: prototype_no_model`); it is never presented as analysis and never affects a payment.
+- **GitHub:** published. `main` is at `cdf9163`.
 
 ## Credentials still required (put in `.env.local`, never in chat or git)
-`PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `PAYPAL_MERCHANT_ID` (sandbox Business), plus a sandbox Personal buyer login (used in the browser only) · `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` · `ANTHROPIC_API_KEY` · chosen `HOMEOWNER_PASSCODE`, `CONTRACTOR_PASSCODE`, `DEMO_PASSCODE`.
+~~`PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `PAYPAL_MERCHANT_ID`~~ (configured; gate 1 passed) · **still needed:** `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and chosen `HOMEOWNER_PASSCODE`, `CONTRACTOR_PASSCODE`, `DEMO_PASSCODE`. `ANTHROPIC_API_KEY` will not be supplied; set `PUNCHPAY_PROTOTYPE_REVIEW=1` instead.
 
 ## Steps to live demo certification
 Follow [INTEGRATION-PLAN.md](INTEGRATION-PLAN.md) gates 1–7, in order:

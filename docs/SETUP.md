@@ -25,6 +25,7 @@ Copy `.env.example` and fill in:
 | `PAYPAL_MERCHANT_ID` | Sandbox accounts → the contractor **Business** account → Account (merchant) ID | Every order names this as `payee.merchant_id`, and every response is checked against it. |
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | A **new, dedicated** Supabase project → Project settings → API | Server only. Browsers never talk to Supabase. |
 | `ANTHROPIC_API_KEY` | console.anthropic.com | Optional. Without it, live review is disabled and no sample report is substituted. |
+| `PUNCHPAY_PROTOTYPE_REVIEW` | set to `1` only when there is **no** key | Credential-free demo path. See §3a. Ignored whenever `ANTHROPIC_API_KEY` is set. |
 | `ANTHROPIC_MODEL` | default `claude-opus-5-5` | |
 | `HOMEOWNER_PASSCODE`, `CONTRACTOR_PASSCODE` | choose, 8+ characters each | Server-enforced roles: homeowner = hold + decision, contractor = photos + review. |
 | `DEMO_PASSCODE` | choose, 8+ characters | Presenter passcode that acts as both roles, for a single-screen demo. |
@@ -51,7 +52,23 @@ npm run sandbox:settle   # authorize both, capture paint $30, void tile $20
 npm run sandbox:verify   # GET-only: capture COMPLETED, tile VOIDED, payee = PAYPAL_MERCHANT_ID
 ```
 The same three commands are rehearsed offline against the simulator in `tests/proof-rehearsal.test.mjs` (part of `npm test`). That proves the script's logic, not PayPal's behavior. Without `.env.local`, the commands stop with `node: .env.local: not found`. With missing variables, they stop with `SANDBOX GATE BLOCKED`, before any network call.
-Copy the redacted IDs, statuses and timestamps into `docs/PROOF-SANDBOX.md`.
+Copy the redacted IDs, statuses and timestamps into `docs/PROOF-SANDBOX.md`. **This was done on Nov 12, 2026 and the gate passed** — that file now holds the observed results.
+
+## 3a. Reviewing without an Anthropic key (prototype path)
+This submission ships without an Anthropic API key, so **no live AI review exists**. To demonstrate
+the complete PayPal flow anyway, set `PUNCHPAY_PROTOTYPE_REVIEW=1` (and leave `ANTHROPIC_API_KEY`
+empty). "Request advisory review" then records a report that:
+
+- makes **no model call** and never opens the images, so it cannot describe them;
+- marks every acceptance criterion `uncertain`, with the reason "no model examined this photo";
+- is always `insufficient_evidence` — it can never say the work appears satisfied;
+- carries `source: "prototype_no_model"`, which the report banner, the source line and the audit
+  trail all show;
+- changes nothing about the money: `decide()` never reads the review.
+
+If `ANTHROPIC_API_KEY` is present, the flag is ignored and the real model call is made. With
+neither the key nor the flag, review stays disabled and returns `503` — no fixture is ever
+substituted silently.
 
 ## 4. Low-disk machines
 If the system disk is short on space, point temp files, the npm cache and Playwright output at a roomier volume:

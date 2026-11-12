@@ -4,6 +4,9 @@ import { z } from "zod";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import type { AIReport, PunchItem } from "./types";
 import { db, EVIDENCE_BUCKET, HttpError } from "./server";
+import { prototypeReview, prototypeReviewEnabled } from "./ai-prototype";
+
+export { prototypeReview, prototypeReviewEnabled };
 
 const DEFAULT_MODEL = "claude-opus-5-5";
 
@@ -42,8 +45,12 @@ async function imageBlock(path: string): Promise<Anthropic.ImageBlockParam> {
 let client: Anthropic | null = null;
 
 export async function analyze(item: PunchItem): Promise<AIReport> {
-  if (!process.env.ANTHROPIC_API_KEY) throw new HttpError(503, "ANTHROPIC_API_KEY is required for live AI review. No sample report is substituted.");
   if (!item.before_path || !item.after_path) throw new HttpError(409, "Both a before and an after photo are required");
+  // A real key always wins: the prototype path can never downgrade or replace live analysis.
+  if (!process.env.ANTHROPIC_API_KEY) {
+    if (prototypeReviewEnabled()) return prototypeReview(item);
+    throw new HttpError(503, "ANTHROPIC_API_KEY is required for live AI review. No sample report is substituted.");
+  }
   const model = process.env.ANTHROPIC_MODEL || DEFAULT_MODEL;
   client ??= new Anthropic();
   const [before, after] = await Promise.all([imageBlock(item.before_path), imageBlock(item.after_path)]);

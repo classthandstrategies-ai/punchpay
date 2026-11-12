@@ -416,6 +416,12 @@ img { display: block; max-width: 100%; }
 .annotation-key { display: flex; gap: 9px; margin: 12px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--muted); }
 .ak-mark { flex: none; width: 15px; height: 15px; margin-top: 2px; border-radius: 50%; border: 2px dashed var(--clay); }
 
+/* ── Prototype review path (no model ran) ─────────────────────────────────── */
+.report.is-prototype { border-left-color: var(--clay); }
+.proto-banner { display: flex; gap: 9px; margin: 0 0 12px; padding: 10px 12px; background: var(--clay-tint); border: 1px solid #d9bfae; font-size: 13px; line-height: 1.5; color: #6c3a24; }
+.proto-banner svg { flex: none; margin-top: 2px; }
+.proto-banner b { display: block; }
+
 /* ── Review clarity ───────────────────────────────────────────────────────── */
 .report-strength { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 10px 0 0; padding: 8px 11px; background: var(--paper); border-left: 2px solid var(--line); font-size: 13.5px; color: var(--ink-2); }
 .report-strength b { font-family: var(--mono); font-size: 10px; font-weight: 400; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }

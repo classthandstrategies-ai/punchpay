@@ -194,9 +194,15 @@ function wouldHelp(report: AIReport) {
 
 export function AdvisoryReport({ report }: { report: AIReport }) {
   const v = VERDICT[report.assessment];
-  const cov = coverage(report);
-  const help = wouldHelp(report);
-  return <div className={cx("report", `verdict-${v.tone}`)}>
+  const proto = report.source === "prototype_no_model";
+  // On the prototype path nothing examined the photos, so neither "coverage" nor a suggestion to
+  // retake them would be honest: the criteria are unjudged because no model ran, not because the
+  // evidence is weak. The banner says exactly that instead.
+  const cov = proto ? null : coverage(report);
+  const help = proto ? [] : wouldHelp(report);
+  return <div className={cx("report", `verdict-${v.tone}`, proto && "is-prototype")}>
+    {proto && <p className="proto-banner"><CircleAlert size={14} aria-hidden="true" />
+      <span><b>Prototype path — no AI ran.</b> This build has no Anthropic API key, so no model examined these photos. Nothing below is analysis of the evidence. The payment outcome is unaffected: the homeowner decides, and the review is never consulted when money moves.</span></p>}
     <p className="report-verdict">{v.text}</p>
     {cov && <p className={cx("report-strength", `str-${cov.tone}`)}><b>Evidence coverage</b>{cov.text}</p>}
     <p className="report-count">{(["supported", "uncertain", "not_supported"] as const).map((r) => `${report.criteria.filter((c) => c.result === r).length} ${r.replace("_", " ")}`).join(" · ")}{report.views_comparable && report.views_comparable !== "yes" && ` · views ${report.views_comparable === "no" ? "not" : "partly"} comparable`}</p>
@@ -212,7 +218,9 @@ export function AdvisoryReport({ report }: { report: AIReport }) {
     {help.length > 0 && <div className="report-notes is-help"><h5><HelpCircle size={13} aria-hidden="true" /> Would more evidence help?</h5>
       <ul>{help.map((o, i) => <li key={i}>{o}</li>)}</ul>
       <p className="help-origin">Suggested by PunchPay from the criteria above. Not a statement from the model.</p></div>}
-    <p className="report-source">{report.source === "live_model" ? `Live analysis · ${report.model}` : "Sample fixture written for synthetic illustrations · not a live model"} · {when(report.reviewed_at)} · Advisory, not a certification or inspection</p>
+    <p className="report-source">{report.source === "live_model" ? `Live analysis · ${report.model}`
+      : proto ? "Prototype path · no model call was made · not analysis"
+      : "Sample fixture written for synthetic illustrations · not a live model"} · {when(report.reviewed_at)} · Advisory, not a certification or inspection</p>
   </div>;
 }
 

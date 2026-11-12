@@ -12,7 +12,13 @@ export type AIReport = {
   views_comparable?: "yes" | "partly" | "no";
   model: string;
   reviewed_at: string;
-  source: "live_model" | "sample_fixture";
+  /**
+   * Where the report came from. `live_model` is set only after a real model call returns.
+   * `sample_fixture` is pre-written text for the offline simulation's synthetic illustrations.
+   * `prototype_no_model` is the credential-free demo path: nothing analysed the photos, and the
+   * report says so. Only `live_model` may ever be presented as analysis.
+   */
+  source: "live_model" | "sample_fixture" | "prototype_no_model";
 };
 export type PunchItem = {
   id: string;

@@ -1,5 +1,6 @@
 import { db, backendConfigured, requireAccess, responseError, signedImage, HttpError } from "@/lib/server";
 import { paypalConfigured } from "@/lib/paypal";
+import { prototypeReviewEnabled } from "@/lib/ai-prototype";
 import type { PunchItem } from "@/lib/types";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -22,7 +23,7 @@ export async function GET(request: Request) {
     return Response.json({
       items, audit: audit || [], mode: "paypal-sandbox", roles,
       paypal: { configured: paypalConfigured(), clientId: process.env.PAYPAL_CLIENT_ID || null },
-      ai: { configured: !!process.env.ANTHROPIC_API_KEY }
+      ai: { configured: !!process.env.ANTHROPIC_API_KEY, prototype: prototypeReviewEnabled() }
     }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) { return responseError(error); }
 }

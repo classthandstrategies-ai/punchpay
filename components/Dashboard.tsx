@@ -247,15 +247,17 @@ export default function Dashboard({ backend: injected, banner, initial, onChange
           <div className="col-judgment">
           <section className="file-section">
             <h3><span className="sec-num">{ROMAN[3]}</span>Advisory evidence review<small>{simulation ? "Fixture · not a live model" : "Claude · describes, never decides"}</small></h3>
-            {busy === "review" ? <div className="report-loading" role="status"><span className="pulse" aria-hidden="true" />{simulation ? "Loading the fixture review…" : "Claude is comparing the before and after photos against each criterion…"}</div>
+            {busy === "review" ? <div className="report-loading" role="status"><span className="pulse" aria-hidden="true" />{simulation ? "Loading the fixture review…" : meta?.ai.prototype ? "Recording the prototype review (no model call)…" : "Claude is comparing the before and after photos against each criterion…"}</div>
               : selected.ai_review ? <AdvisoryReport report={selected.ai_review} />
               : <p className="muted-line">{missing ? `The review needs both photos. ${missing}` : "Photos are in. The contractor can request the advisory review."}</p>}
             {role === "contractor" && live && (selected.state === "submitted" || selected.state === "reviewed" || (selected.state === "authorized" && selected.paypal_auth_id)) && !selected.homeowner_decision && <>
-              <button type="button" className="btn btn-outline" disabled={!!busy || !meta?.ai.configured || !!missing} onClick={() => act("review", "review")} aria-describedby={missing ? "review-why" : undefined}>
+              <button type="button" className="btn btn-outline" disabled={!!busy || !(meta?.ai.configured || meta?.ai.prototype) || !!missing} onClick={() => act("review", "review")} aria-describedby={missing ? "review-why" : undefined}>
                 <Sparkles size={15} aria-hidden="true" />{busy === "review" ? "Reviewing photos…" : selected.ai_review ? "Run the review again" : "Request advisory review"}
               </button>
               {missing && <p className="fine" id="review-why">Unavailable until both photos are submitted.</p>}
-              {!meta?.ai.configured && <p className="fine">ANTHROPIC_API_KEY is not set on the server; no sample report is substituted.</p>}
+              {!meta?.ai.configured && (meta?.ai.prototype
+                ? <p className="fine">Prototype path: no Anthropic API key is set, so no model will examine the photos. The review will say so, and it never affects the payment.</p>
+                : <p className="fine">ANTHROPIC_API_KEY is not set on the server; no sample report is substituted.</p>)}
             </>}
           </section>
 
