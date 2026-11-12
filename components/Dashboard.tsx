@@ -131,6 +131,7 @@ export default function Dashboard({ backend: injected, banner, initial, onChange
   const itemEvents = audit.filter((e) => e.item_id === selected.id);
   const isTerminal = ["captured", "voided", "hold_ended"].includes(selected.state);
   const missing = missingEvidence(selected);
+  const visionProvider = meta?.ai.provider === "gemini" ? "Gemini" : "Claude";
   const source = simulation ? "simulated PayPal" : "PayPal";
   const Source = simulation ? "Simulated PayPal" : "PayPal"; // sentence-initial
   const retry = selected.state === "reviewed" ? selected.homeowner_decision : null;
@@ -167,7 +168,7 @@ export default function Dashboard({ backend: injected, banner, initial, onChange
           <p className="lede">A homeowner and a contractor finishing a renovation rarely disagree about the whole job — they disagree about one or two fixes. PunchPay settles them one at a time.</p>
           <ol className="how" aria-label="How PunchPay works">
             <li><b>A hold per fix.</b> The homeowner approves a separate PayPal authorization for each item, so money is reserved but not charged.</li>
-            <li><b>Evidence, then an advisory review.</b> The contractor submits before and after photos. {!simulation && meta?.ai.prototype ? "In this build no model runs: the review records that nothing examined the photos, so the homeowner judges the evidence directly." : "Claude describes what they show against the agreed criteria, and says plainly what it cannot tell."}</li>
+            <li><b>Evidence, then an advisory review.</b> The contractor submits before and after photos. {!simulation && meta?.ai.prototype ? "In this build no model runs: the review records that nothing examined the photos, so the homeowner judges the evidence directly." : `${visionProvider} describes what they show against the agreed criteria, and says plainly what it cannot tell.`}</li>
             <li><b>The homeowner decides.</b> Accept and that item&rsquo;s hold is captured; reject and it is voided. One item never affects the other, and the review never moves money.</li>
           </ol>
         </div>
@@ -246,8 +247,8 @@ export default function Dashboard({ backend: injected, banner, initial, onChange
           </div>
           <div className="col-judgment">
           <section className="file-section">
-            <h3><span className="sec-num">{ROMAN[3]}</span>Advisory evidence review<small>{simulation ? "Fixture · not a live model" : meta?.ai.prototype ? "Prototype path · no model runs" : "Claude · describes, never decides"}</small></h3>
-            {busy === "review" ? <div className="report-loading" role="status"><span className="pulse" aria-hidden="true" />{simulation ? "Loading the fixture review…" : meta?.ai.prototype ? "Recording the prototype review (no model call)…" : "Claude is comparing the before and after photos against each criterion…"}</div>
+            <h3><span className="sec-num">{ROMAN[3]}</span>Advisory evidence review<small>{simulation ? "Fixture · not a live model" : meta?.ai.prototype ? "Prototype path · no model runs" : `${visionProvider} · describes, never decides`}</small></h3>
+            {busy === "review" ? <div className="report-loading" role="status"><span className="pulse" aria-hidden="true" />{simulation ? "Loading the fixture review…" : meta?.ai.prototype ? "Recording the prototype review (no model call)…" : `${visionProvider} is comparing the before and after photos against each criterion…`}</div>
               : selected.ai_review ? <AdvisoryReport report={selected.ai_review} />
               : <p className="muted-line">{missing ? `The review needs both photos. ${missing}` : "Photos are in. The contractor can request the advisory review."}</p>}
             {role === "contractor" && live && (selected.state === "submitted" || selected.state === "reviewed" || (selected.state === "authorized" && selected.paypal_auth_id)) && !selected.homeowner_decision && <>
