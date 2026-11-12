@@ -2,6 +2,8 @@
 
 Every shot must be real app footage against the PayPal sandbox. No mock screens. **This submission has no Anthropic key:** the review on screen is the labeled `prototype_no_model` path, and the narration must say so — never describe it as Claude analysing the photos. The photos are labeled synthetic illustrations. `docs/PROOF-SANDBOX.md` is complete (two passed runs).
 
+**Optional genuinely AI-powered recording, only after certification:** To show actual image analysis rather than the honest prototype review, configure `GEMINI_API_KEY` in the protected staging environment, redeploy, run two real vision reviews on the labelled synthetic images, and verify the report source is `live_model` and model is Gemini. Replace the prototype narration at 0:58–1:28 with the actual findings visible on screen. Do not invent confidence percentages. Confirm no payment decisions consume model output. If no key or no successful test, keep this original no-model script exactly as written.
+
 **Prep before recording**
 - Run the demo reset (`select public.punchpay_reset_demo();` as service role). This archives the previous run. It refuses while a capture or void is unconfirmed (reconcile first). It also refuses while PayPal holds are still open; void or let them end, or knowingly pass `punchpay_reset_demo(true)` to leave them open in the sandbox.
 - Log in with `DEMO_PASSCODE` (the presenter, both roles) so the role switch works on one screen.

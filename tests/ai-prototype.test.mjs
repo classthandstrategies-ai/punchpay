@@ -38,6 +38,8 @@ test("the prototype path is off unless switched on, and a real key always wins",
     assert.equal(prototypeReviewEnabled(), false, "a configured key must take precedence");
     process.env = { ...env, ANTHROPIC_API_KEY: "", PUNCHPAY_PROTOTYPE_REVIEW: undefined };
     assert.equal(prototypeReviewEnabled(), false, "off by default when the flag is absent");
+    process.env = { ...env, ANTHROPIC_API_KEY: "", GEMINI_API_KEY: "fake-key", PUNCHPAY_PROTOTYPE_REVIEW: "1" };
+    assert.equal(prototypeReviewEnabled(), false, "Gemini key must prevent silent no-model fallback");
     process.env = { ...env, ANTHROPIC_API_KEY: "", PUNCHPAY_PROTOTYPE_REVIEW: "0" };
     assert.equal(prototypeReviewEnabled(), false, "only an explicit 1 enables it");
     process.env = { ...env, ANTHROPIC_API_KEY: "", PUNCHPAY_PROTOTYPE_REVIEW: "1" };

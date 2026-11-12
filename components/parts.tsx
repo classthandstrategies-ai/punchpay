@@ -72,7 +72,11 @@ export function Timeline({ events, items, compact }: { events: AuditEvent[]; ite
       <div className="tl-body">
         <p className="tl-what">{EVENT_LABEL[e.action] || e.action.replaceAll("_", " ")}</p>
         <p className="tl-meta">
-          <span>{e.action === "evidence_reviewed" && (e.payload as { source?: string })?.source === "prototype_no_model" ? "Prototype review (no model)" : ACTOR[e.actor] || e.actor}</span>
+          <span>{e.action === "evidence_reviewed"
+            ? (e.payload as { source?: string })?.source === "prototype_no_model" ? "Prototype review (no model)"
+              : /gemini/i.test(String((e.payload as { model?: string })?.model || "")) ? "Gemini (advisory)"
+              : ACTOR[e.actor] || e.actor
+            : ACTOR[e.actor] || e.actor}</span>
           {items && title(e.item_id) && <span>{title(e.item_id)}</span>}
           <time dateTime={e.created_at}>{when(e.created_at)}</time>
           {eventDetail(e) && <code>{eventDetail(e)}</code>}
@@ -205,7 +209,7 @@ export function AdvisoryReport({ report }: { report: AIReport }) {
   const help = proto ? [] : wouldHelp(report);
   return <div className={cx("report", `verdict-${v.tone}`, proto && "is-prototype")}>
     {proto && <p className="proto-banner"><CircleAlert size={14} aria-hidden="true" />
-      <span><b>Prototype path — no AI ran.</b> This build has no Anthropic API key, so no model examined these photos. Nothing below is analysis of the evidence. The payment outcome is unaffected: the homeowner decides, and the review is never consulted when money moves.</span></p>}
+      <span><b>Prototype path — no AI ran.</b> This build has no configured vision-model API key, so no model examined these photos. Nothing below is analysis of the evidence. The payment outcome is unaffected: the homeowner decides, and the review is never consulted when money moves.</span></p>}
     <p className="report-verdict">{v.text}</p>
     {cov && <p className={cx("report-strength", `str-${cov.tone}`)}><b>Evidence coverage</b>{cov.text}</p>}
     <p className="report-count">{(["supported", "uncertain", "not_supported"] as const).map((r) => `${report.criteria.filter((c) => c.result === r).length} ${r.replace("_", " ")}`).join(" · ")}{report.views_comparable && report.views_comparable !== "yes" && ` · views ${report.views_comparable === "no" ? "not" : "partly"} comparable`}</p>

@@ -24,8 +24,10 @@ Copy `.env.example` and fill in:
 | `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` | developer.paypal.com → Apps & Credentials (**Sandbox**) → a REST app owned by the contractor's sandbox **Business** account | The client ID is public: the server hands it to the JS SDK. The secret stays on the server. |
 | `PAYPAL_MERCHANT_ID` | Sandbox accounts → the contractor **Business** account → Account (merchant) ID | Every order names this as `payee.merchant_id`, and every response is checked against it. |
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | A **new, dedicated** Supabase project → Project settings → API | Server only. Browsers never talk to Supabase. |
-| `ANTHROPIC_API_KEY` | console.anthropic.com | Optional. Without it, live review is disabled and no sample report is substituted. |
-| `PUNCHPAY_PROTOTYPE_REVIEW` | set to `1` only when there is **no** key | Credential-free demo path. See §3a. Ignored whenever `ANTHROPIC_API_KEY` is set. |
+| `GEMINI_API_KEY` | [Google AI Studio](https://aistudio.google.com/apikey) → Create API key (new Auth key) | Optional free-tier real vision review. A key is required; no billing setup is needed if your project has free-tier access. Server-side only. |
+| `GEMINI_MODEL` | default `gemini-2.5-flash` | Image input, per-criterion JSON output; subject to free quotas and region availability. |
+| `ANTHROPIC_API_KEY` | console.anthropic.com | Optional alternative real vision provider. If both Claude and Gemini keys are present, Claude wins. |
+| `PUNCHPAY_PROTOTYPE_REVIEW` | set to `1` only when **neither** AI key is configured | No-model placeholder for showcasing payments. See §3a. Automatically disabled whenever a real key is present. |
 | `ANTHROPIC_MODEL` | default `claude-opus-5-5` | |
 | `HOMEOWNER_PASSCODE`, `CONTRACTOR_PASSCODE` | choose, 8+ characters each | Server-enforced roles: homeowner = hold + decision, contractor = photos + review. |
 | `DEMO_PASSCODE` | choose, 8+ characters | Presenter passcode that acts as both roles, for a single-screen demo. |
@@ -55,8 +57,8 @@ The same three commands are rehearsed offline against the simulator in `tests/pr
 Copy the redacted IDs, statuses and timestamps into `docs/PROOF-SANDBOX.md`. **This was done on Nov 12, 2026 and the gate passed** — that file now holds the observed results.
 
 ## 3a. Reviewing without an Anthropic key (prototype path)
-This submission ships without an Anthropic API key, so **no live AI review exists**. To demonstrate
-the complete PayPal flow anyway, set `PUNCHPAY_PROTOTYPE_REVIEW=1` (and leave `ANTHROPIC_API_KEY`
+The original verified submission proof was recorded without any vision-model API key, so **no live AI review occurred in those proof runs**. To demonstrate
+the complete PayPal flow anyway, set `PUNCHPAY_PROTOTYPE_REVIEW=1` (and leave both `ANTHROPIC_API_KEY` and `GEMINI_API_KEY`
 empty). "Request advisory review" then records a report that:
 
 - makes **no model call** and never opens the images, so it cannot describe them;
@@ -66,9 +68,20 @@ empty). "Request advisory review" then records a report that:
   trail all show;
 - changes nothing about the money: `decide()` never reads the review.
 
-If `ANTHROPIC_API_KEY` is present, the flag is ignored and the real model call is made. With
-neither the key nor the flag, review stays disabled and returns `503` — no fixture is ever
-substituted silently.
+If either real provider key is present, the prototype flag is ignored and a real model request is attempted. Claude takes precedence if both keys are provided. Without any key or the flag, review returns `503`, never a silent fixture.
+
+## 3b. Real AI review with Gemini 2.5 Flash (free-tier option)
+
+1. Open [Google AI Studio API keys](https://aistudio.google.com/apikey). Select a Free Tier project and create a new **Auth** API key. Free-tier availability and quotas depend on the project and country. Do **not** enable billing unless you choose to pay.
+2. Put `GEMINI_API_KEY` into your **local** `.env.local` or the protected Vercel team's **Production** environment. Set `GEMINI_MODEL=gemini-2.5-flash`. Leave `ANTHROPIC_API_KEY` absent, and remove/disable the prototype flag or let the key automatically take precedence.
+3. Restart `npm run dev` or redeploy the staging project after changing environment variables. Unlock the application, upload two labelled sample before/after images, then ask the contractor role to request a review.
+4. First run `npm run ai:smoke` locally. This sends two *labelled synthetic* before/after illustration pairs to Gemini, prints their returned findings, and moves no money. It must print `AI SMOKE PASSED: 2/2` before you claim any AI integration.
+5. Verify **two real API calls** and the UI report source `Live analysis · gemini-2.5-flash` (or the returned model version), with meaningful image-dependent findings. Confirm the audit stores `source: live_model`, model name, and uncertainty. Repeat with a different repair. If the API rejects the key, model or free-tier quota, fix that instead of pretending the review succeeded.
+6. Re-run `npm run typecheck && npm test && npm run build && npm run test:e2e`. Then update `docs/PROOF-SANDBOX.md` or add a separate AI proof document with the **actual** model name, timestamp, screenshots, and outcome. Do not rewrite the existing PayPal proofs.
+
+**Privacy:** Google's free API tier may use submitted content to improve its products. Use only the project's clearly marked synthetic sample images or otherwise approved, non-sensitive material. The key never goes in a browser variable. Gemini's output is advisory and can be wrong; the homeowner alone decides, and `decide()` does not read the AI report.
+
+**Status:** This adapter is supplied as a release-candidate integration. Until a real Gemini request with a genuine key is observed, it is **implemented but not live-certified**.
 
 ## 4. Low-disk machines
 If the system disk is short on space, point temp files, the npm cache and Playwright output at a roomier volume:

@@ -6,7 +6,7 @@ import type { AIReport, PunchItem } from "./types";
 
 /** The prototype path is available only when it is switched on AND there is no key to use instead. */
 export const prototypeReviewEnabled = () =>
-  !process.env.ANTHROPIC_API_KEY && process.env.PUNCHPAY_PROTOTYPE_REVIEW === "1";
+  !process.env.ANTHROPIC_API_KEY && !process.env.GEMINI_API_KEY && process.env.PUNCHPAY_PROTOTYPE_REVIEW === "1";
 
 /**
  * Credential-free review path, so the PayPal sandbox story can be demonstrated end to end without

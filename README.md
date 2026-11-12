@@ -1,19 +1,19 @@
 # PunchPay
 **Every fix reviewed. Every payment decided.**
 
-PunchPay is an AI-assisted renovation closeout app made for the [PayPal AI Hackathon 2026](https://paypalaihackathon.devpost.com/). Contractors attach before-and-after evidence to independently authorized small fixes; an advisory review slot reports per-criterion support and uncertainty (a Claude vision path when a key is configured — **not exercised for this submission**; otherwise a labeled no-model path); homeowners choose whether a specific item is paid (capture) or released (void). All payments in this demo use the **PayPal sandbox**. This is not escrow, construction certification, or a guaranteed payment.
+PunchPay is an AI-assisted renovation closeout app made for the [PayPal AI Hackathon 2026](https://paypalaihackathon.devpost.com/). Contractors attach before-and-after evidence to independently authorized small fixes; an advisory review slot reports per-criterion support and uncertainty (a Gemini 2.5 Flash or Claude vision path when a provider key is configured — **not yet exercised in the certified demo**; otherwise a labeled no-model path); homeowners choose whether a specific item is paid (capture) or released (void). All payments in this demo use the **PayPal sandbox**. This is not escrow, construction certification, or a guaranteed payment.
 
 ## Project state (Nov 12, 2026)
 | Area | Status | Evidence |
 | --- | --- | --- |
 | Typecheck, production build | Passing | `npm run typecheck`, `npm run build` |
-| Payment flows, image checks, scenarios, proof-script rehearsal, prototype-path safety | 50 offline tests passing | `npm test` |
+| Payment flows, image checks, scenarios, proof-script rehearsal, prototype-path safety | 55 offline tests passing (50 baseline + 5 Gemini adapter checks) | `npm test` |
 | Database guards (state machine, audit, reset) | Passing on PostgreSQL 16 | `npm run test:db` |
 | Browser tests incl. axe accessibility, desktop + mobile | 28 passing | `npm run test:e2e` |
 | Offline simulation of six payment scenarios | Working, labeled "Simulation" | `/simulation` |
 | PayPal sandbox proof | **Passed twice** (CLI, and through the app in a browser): $30 captured, $20 voided, payee verified by GET | `docs/PROOF-SANDBOX.md` |
 | Supabase persistence, uploads | Verified on the dedicated project: guards live, uploads stored privately, state survives refresh | `docs/PROOF-SANDBOX.md` (Gate 4) |
-| Live Claude review | **Not run — no key was purchased.** The demo uses the labeled `prototype_no_model` path: no model examined the photos and the report says so | `docs/SETUP.md` §3a |
+| Live vision review | **Not yet run in the certified demo.** A free-tier Gemini 2.5 Flash option and the optional Claude path are implemented. The certified payment recordings used labeled `prototype_no_model`, not AI analysis | `docs/SETUP.md` §§3a–3b |
 | Demo photographs | **Synthetic illustrations**, stamped "SYNTHETIC ILLUSTRATION · NOT A PHOTO" in the image | `lib/sim/illustrations.ts` |
 
 Nothing marked "not run" should be described as working. Full status: [`docs/OFFLINE-READINESS.md`](docs/OFFLINE-READINESS.md).
@@ -25,7 +25,7 @@ Nothing marked "not run" should be described as working. Full status: [`docs/OFF
 - [Demo video script](DEMO-SCRIPT.md) · [Devpost copy](docs/SUBMISSION.md)
 
 ## Stack
-Next.js 16 App Router + TypeScript + custom CSS; Supabase Postgres and private Storage; Claude vision; PayPal Orders v2 and Payments v2 sandbox APIs. The app is deliberately small: two items, no broad project management.
+Next.js 16 App Router + TypeScript + custom CSS; Supabase Postgres and private Storage; Gemini 2.5 Flash or Claude vision (both optional); PayPal Orders v2 and Payments v2 sandbox APIs. The app is deliberately small: two items, no broad project management.
 
 ## Start
 1. Use Node.js 22+. From the project root: `npm install`.
@@ -34,7 +34,7 @@ Next.js 16 App Router + TypeScript + custom CSS; Supabase Postgres and private S
    - copy `.env.example` to `.env.local`
    - fill in the PayPal sandbox contractor Business app and `PAYPAL_MERCHANT_ID`
    - fill in a **new dedicated** Supabase project (apply `supabase/migrations/*` in order, then `supabase/seed.sql`)
-   - add `ANTHROPIC_API_KEY`
+   - add `GEMINI_API_KEY` from AI Studio for optional real image review on its free tier, or an `ANTHROPIC_API_KEY` if available; with neither, enable the explicitly labeled prototype mode
    - set `HOMEOWNER_PASSCODE`, `CONTRACTOR_PASSCODE` and `DEMO_PASSCODE` (presenter, both roles)
 4. Run `npm run typecheck && npm test && npm run test:db && npm run build && npm run test:e2e`.
 5. Run `npm run dev` and visit http://localhost:3000. Unlock with a passcode. Without credentials or data, `/` is explicitly a **design preview** and payment actions are inactive.
@@ -71,13 +71,17 @@ The CLI should verify `purchase_units[0].payee.merchant_id` is exactly `PAYPAL_M
 
 Every request requires `x-demo-passcode`. The server maps the passcode to roles: homeowner for create-order, authorize and decision; contractor for upload and review; either role for listing and sync. This is a **hackathon sandbox gate, not real identity**. Production would need real accounts (e.g. Supabase Auth) with per-project membership, plus PayPal webhook signature verification. Never run this with live money.
 
+## Live AI path and certification status
+
+The payment workflow is certified against PayPal Sandbox. With a private Gemini free-tier key, run `npm run ai:smoke` to exercise two separate image-understanding calls against labelled synthetic images without touching money.  The real Gemini vision adapter is **implemented but not yet certified with an API key**; a free-tier account, a real two-image model response, and an updated recording are still required to claim that vision AI actually ran. The no-model prototype is never passed off as analysis. See [Gemini setup](docs/SETUP.md#3b-real-ai-review-with-gemini-25-flash-free-tier-option). The homeowner's payment decision remains independent of AI output.
+
 ## Judge delivery checklist
-- [ ] Both PayPal sandbox orders approved by sandbox buyer and authorized as contractor merchant.
-- [ ] Paint `$30`: verified `COMPLETED` capture ID.
-- [ ] Tile `$20`: verified `VOIDED` authorization ID.
+- [x] Both PayPal sandbox orders approved by sandbox buyer and authorized as contractor merchant (CLI and browser proof).
+- [x] Paint `$30`: verified `COMPLETED` capture ID.
+- [x] Tile `$20`: verified `VOIDED` authorization ID.
 - [ ] Two independently generated live AI reviews over real or clearly labeled staged photos.
-- [ ] Responsive, working web demo with persisted audit/payment records.
-- [ ] Public repository with visible `LICENSE` and complete instructions.
+- [x] Responsive, working web demo with persisted audit/payment records, as tested on the dedicated sandbox.
+- [x] Public repository with visible `LICENSE` and complete instructions.
 - [ ] Public YouTube video strictly under three minutes; clear actual app footage.
 - [ ] Final Devpost submission by **Nov 12, 2026 12 PM PST / Nov 13 1:30 AM IST**.
 
