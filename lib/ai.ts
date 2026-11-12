@@ -39,7 +39,7 @@ async function imageBlock(path: string) {
   const { data, error } = await db().storage.from(EVIDENCE_BUCKET).download(path);
   if (error || !data) throw new HttpError(500, "Could not read evidence image");
   const bytes = Buffer.from(await data.arrayBuffer());
-  const media_type = path.endsWith(".png") ? "image/png" : path.endsWith(".webp") ? "image/webp" : "image/jpeg";
+  const media_type: "image/png" | "image/webp" | "image/jpeg" = path.endsWith(".png") ? "image/png" : path.endsWith(".webp") ? "image/webp" : "image/jpeg";
   return { type: "image" as const, source: { type: "base64" as const, media_type, data: bytes.toString("base64") } };
 }
 
@@ -95,7 +95,9 @@ export async function analyze(item: PunchItem): Promise<AIReport> {
     try {
       result = await callGeminiVision({
         apiKey: geminiKey!, model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
-        system: SYSTEM, prompt, before: before.source, after: after.source
+        system: SYSTEM, prompt,
+        before: { mime_type: before.source.media_type, data: before.source.data },
+        after: { mime_type: after.source.media_type, data: after.source.data }
       });
     } catch (error) {
       if (error instanceof GeminiProviderError) {
