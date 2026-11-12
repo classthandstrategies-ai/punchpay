@@ -5,7 +5,7 @@
  */
 import type { AuditEvent, PunchItem, Role } from "./types";
 
-export type Meta = { paypal: { configured: boolean; clientId: string | null }; ai: { configured: boolean; prototype?: boolean }; roles: Role[] };
+export type Meta = { paypal: { configured: boolean; clientId: string | null }; ai: { configured: boolean; prototype?: boolean; provider?: "claude" | "gemini" | null }; roles: Role[] };
 export type Snapshot = { items: PunchItem[]; audit: AuditEvent[]; meta: Meta };
 export type Action = "create-order" | "authorize" | "review" | "decision" | "sync";
 export type ActionResult = { message?: string; capture_id?: string | null; authorization_id?: string | null; state?: string; paypal_status?: string | null; already?: boolean; id?: string; status?: string | null };
