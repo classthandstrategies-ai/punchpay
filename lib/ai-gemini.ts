@@ -14,7 +14,8 @@ export type GeminiRequest = {
 };
 
 export class GeminiProviderError extends Error {
-  constructor(public readonly status: number, message: string) { super(message); }
+  readonly status: number;
+  constructor(status: number, message: string) { super(message); this.status = status; }
 }
 
 const criterionSchema = {
