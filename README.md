@@ -73,7 +73,7 @@ Every request requires `x-demo-passcode`. The server maps the passcode to roles:
 
 ## Live AI path and certification status
 
-The payment workflow is certified against PayPal Sandbox. The real Gemini vision adapter is **implemented but not yet certified with an API key**; a free-tier account, a real two-image model response, and an updated recording are still required to claim that vision AI actually ran. The no-model prototype is never passed off as analysis. See [Gemini setup](docs/SETUP.md#3b-real-ai-review-with-gemini-25-flash-free-tier-option). The homeowner's payment decision remains independent of AI output.
+The payment workflow is certified against PayPal Sandbox. With a private Gemini free-tier key, run `npm run ai:smoke` to exercise two separate image-understanding calls against labelled synthetic images without touching money.  The real Gemini vision adapter is **implemented but not yet certified with an API key**; a free-tier account, a real two-image model response, and an updated recording are still required to claim that vision AI actually ran. The no-model prototype is never passed off as analysis. See [Gemini setup](docs/SETUP.md#3b-real-ai-review-with-gemini-25-flash-free-tier-option). The homeowner's payment decision remains independent of AI output.
 
 ## Judge delivery checklist
 - [x] Both PayPal sandbox orders approved by sandbox buyer and authorized as contractor merchant (CLI and browser proof).
